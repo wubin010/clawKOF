@@ -9,7 +9,7 @@ export async function runDemoMode(baseUrl: string): Promise<DemoInfo> {
   const aResp = await fetch(`${baseUrl}/api/matches/join`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'Claw Alpha', duration: 120 }),
+    body: JSON.stringify({ name: 'Claw Alpha', duration: 90 }),
   });
   if (!aResp.ok) {
     throw new Error(`Unable to create demo match: ${aResp.status}`);
@@ -89,19 +89,45 @@ async function driveBot(baseUrl: string, matchId: string, name: string, slot: 'A
 }
 
 function chooseAction(energy: number, distance: number, hp: number, enemyHp: number): FighterAction {
-  if (energy >= 35 && distance <= 14) {
-    return Math.random() < 0.7 ? 'heavy_attack' : 'guard';
+  // Special finisher: high energy, in range, enemy low
+  if (energy >= 55 && distance <= 16 && enemyHp <= 40) {
+    return Math.random() < 0.8 ? 'special' : 'heavy_attack';
   }
-  if (energy >= 20 && distance <= 20) {
-    return Math.random() < 0.65 ? 'light_attack' : 'guard';
+
+  // Heavy attack at close range
+  if (energy >= 30 && distance <= 14) {
+    const r = Math.random();
+    if (r < 0.5) return 'heavy_attack';
+    if (r < 0.7) return 'counter';
+    return 'guard';
   }
+
+  // Light attack at mid range
+  if (energy >= 18 && distance <= 18) {
+    const r = Math.random();
+    if (r < 0.5) return 'light_attack';
+    if (r < 0.7) return 'counter';
+    return 'guard';
+  }
+
+  // Dash attack to close gap and harass
+  if (energy >= 12 && distance > 16 && distance <= 28) {
+    return Math.random() < 0.6 ? 'dash_attack' : 'forward';
+  }
+
+  // Far away: approach
   if (distance > 18) {
     return Math.random() < 0.8 ? 'forward' : 'idle';
   }
+
+  // Low HP defensive play
   if (hp < 30 && enemyHp > hp) {
-    return Math.random() < 0.65 ? 'guard' : 'backward';
+    const r = Math.random();
+    if (r < 0.4) return 'counter';
+    if (r < 0.7) return 'guard';
+    return 'backward';
   }
 
-  const pool: FighterAction[] = ['idle', 'forward', 'backward', 'guard'];
+  const pool: FighterAction[] = ['idle', 'forward', 'backward', 'guard', 'counter'];
   return pool[Math.floor(Math.random() * pool.length)];
 }

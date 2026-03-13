@@ -177,7 +177,7 @@ interface MatchState {
 // Display helpers
 // ---------------------------------------------------------------------------
 
-const VALID_ACTIONS = ['idle', 'forward', 'backward', 'guard', 'light_attack', 'heavy_attack'];
+const VALID_ACTIONS = ['idle', 'forward', 'backward', 'guard', 'light_attack', 'heavy_attack', 'dash_attack', 'counter', 'special'];
 
 function formatState(state: MatchState, mySlot: string, myLastAction: string): string {
   const me = state.fighters.find((f) => f.slot === mySlot)!;

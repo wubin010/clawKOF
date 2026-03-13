@@ -6,7 +6,10 @@ export type FighterAction =
   | 'backward'
   | 'guard'
   | 'light_attack'
-  | 'heavy_attack';
+  | 'heavy_attack'
+  | 'dash_attack'
+  | 'counter'
+  | 'special';
 
 export type MatchStatus = 'waiting' | 'running' | 'finished';
 
@@ -20,6 +23,9 @@ const VALID_ACTIONS: FighterAction[] = [
   'guard',
   'light_attack',
   'heavy_attack',
+  'dash_attack',
+  'counter',
+  'special',
 ];
 
 interface FighterInternalState {
@@ -29,6 +35,7 @@ interface FighterInternalState {
   energy: number;
   position: number;
   currentAction: FighterAction;
+  totalDamageDealt: number;
 }
 
 export interface MatchEvent {
@@ -165,6 +172,7 @@ export class MatchEngine {
           energy: 30,
           position: 25,
           currentAction: 'idle',
+          totalDamageDealt: 0,
         },
         {
           slot: 'B',
@@ -173,6 +181,7 @@ export class MatchEngine {
           energy: 30,
           position: 75,
           currentAction: 'idle',
+          totalDamageDealt: 0,
         },
       ],
       pendingActions: new Map<FighterSlot, FighterAction>(),
@@ -256,6 +265,9 @@ export class MatchEngine {
     }
     if (!VALID_ACTIONS.includes(action)) {
       throw new Error(`Invalid action: ${action}`);
+    }
+    if (match.pendingActions.has(fighter.slot)) {
+      throw new Error('Action already submitted for this tick.');
     }
 
     match.pendingActions.set(fighter.slot, action);
@@ -352,15 +364,57 @@ export class MatchEngine {
     match.timeRemaining = Math.max(0, match.timeRemaining - 1);
 
     const [fighterA, fighterB] = match.fighters;
-    const actionA = match.pendingActions.get('A') ?? 'idle';
-    const actionB = match.pendingActions.get('B') ?? 'idle';
+    let actionA = match.pendingActions.get('A') ?? 'idle';
+    let actionB = match.pendingActions.get('B') ?? 'idle';
     match.pendingActions.clear();
+
+    // Energy regen (7 per tick)
+    fighterA.energy = Math.min(100, fighterA.energy + 7);
+    fighterB.energy = Math.min(100, fighterB.energy + 7);
+
+    // Guard energy gate: guard costs 8 energy, fails to idle if insufficient
+    if (actionA === 'guard') {
+      if (fighterA.energy >= 8) {
+        fighterA.energy -= 8;
+      } else {
+        actionA = 'idle';
+      }
+    }
+    if (actionB === 'guard') {
+      if (fighterB.energy >= 8) {
+        fighterB.energy -= 8;
+      } else {
+        actionB = 'idle';
+      }
+    }
+
+    // Counter energy gate: counter costs 15 energy, fails to idle if insufficient
+    if (actionA === 'counter') {
+      if (fighterA.energy >= 15) {
+        fighterA.energy -= 15;
+      } else {
+        actionA = 'idle';
+      }
+    }
+    if (actionB === 'counter') {
+      if (fighterB.energy >= 15) {
+        fighterB.energy -= 15;
+      } else {
+        actionB = 'idle';
+      }
+    }
+
+    // Dash attack must have enough energy to dash. If not, it degrades to idle.
+    // (Damage cost is still deducted later inside resolveStrike when the attack executes.)
+    if (actionA === 'dash_attack' && fighterA.energy < 12) {
+      actionA = 'idle';
+    }
+    if (actionB === 'dash_attack' && fighterB.energy < 12) {
+      actionB = 'idle';
+    }
 
     fighterA.currentAction = actionA;
     fighterB.currentAction = actionB;
-
-    fighterA.energy = Math.min(100, fighterA.energy + 10);
-    fighterB.energy = Math.min(100, fighterB.energy + 10);
 
     this.applyMovement(fighterA, actionA);
     this.applyMovement(fighterB, actionB);
@@ -368,25 +422,40 @@ export class MatchEngine {
 
     const distance = Math.abs(fighterA.position - fighterB.position);
 
+    // Resolve strikes (attacks + counter logic)
     const strikeA = this.resolveStrike(fighterA, fighterB, actionA, actionB, distance);
     const strikeB = this.resolveStrike(fighterB, fighterA, actionB, actionA, distance);
 
-    fighterA.hp = Math.max(0, fighterA.hp - strikeB.damage);
-    fighterB.hp = Math.max(0, fighterB.hp - strikeA.damage);
+    // Counter resolution: if a fighter uses counter and is attacked, reflect 14 damage
+    let counterDmgA = 0; // extra damage A takes from B's counter
+    let counterDmgB = 0; // extra damage B takes from A's counter
+    if (actionA === 'counter' && strikeB.landed) {
+      counterDmgB = 14; // A reflects 14 to B
+    }
+    if (actionB === 'counter' && strikeA.landed) {
+      counterDmgA = 14; // B reflects 14 to A
+    }
+
+    fighterA.hp = Math.max(0, fighterA.hp - strikeB.damage - counterDmgA);
+    fighterB.hp = Math.max(0, fighterB.hp - strikeA.damage - counterDmgB);
+
+    // Track total damage dealt
+    fighterA.totalDamageDealt += strikeA.damage + counterDmgB;
+    fighterB.totalDamageDealt += strikeB.damage + counterDmgA;
 
     const message = [
       `Tick ${match.tick}:`,
       `A=${actionA}`,
       `B=${actionB}`,
-      `damage(A<=${strikeB.damage}, B<=${strikeA.damage})`,
+      `damage(A<=${strikeB.damage + counterDmgA}, B<=${strikeA.damage + counterDmgB})`,
       `distance=${Math.round(distance)}`,
     ].join(' ');
 
     this.addEvent(match, 'tick', message, {
       actionA,
       actionB,
-      strikeA,
-      strikeB,
+      strikeA: { ...strikeA, counterReflect: counterDmgB },
+      strikeB: { ...strikeB, counterReflect: counterDmgA },
       distance,
     });
 
@@ -401,8 +470,12 @@ export class MatchEngine {
         this.finishMatch(match, 'A', `${fighterA.name} wins on HP after timeout.`);
       } else if (fighterB.hp > fighterA.hp) {
         this.finishMatch(match, 'B', `${fighterB.name} wins on HP after timeout.`);
+      } else if (fighterA.totalDamageDealt > fighterB.totalDamageDealt) {
+        this.finishMatch(match, 'A', `${fighterA.name} wins on damage dealt after timeout.`);
+      } else if (fighterB.totalDamageDealt > fighterA.totalDamageDealt) {
+        this.finishMatch(match, 'B', `${fighterB.name} wins on damage dealt after timeout.`);
       } else {
-        this.finishMatch(match, 'draw', 'Timeout draw. Equal HP.');
+        this.finishMatch(match, 'draw', 'Timeout draw. Equal HP and damage.');
       }
     }
 
@@ -422,18 +495,23 @@ export class MatchEngine {
 
   private applyMovement(fighter: FighterInternalState, action: FighterAction): void {
     const speed = 6;
+    const dashSpeed = 10;
 
     if (fighter.slot === 'A') {
       if (action === 'forward') {
         fighter.position += speed;
       } else if (action === 'backward') {
         fighter.position -= speed;
+      } else if (action === 'dash_attack') {
+        fighter.position += dashSpeed;
       }
     } else {
       if (action === 'forward') {
         fighter.position -= speed;
       } else if (action === 'backward') {
         fighter.position += speed;
+      } else if (action === 'dash_attack') {
+        fighter.position -= dashSpeed;
       }
     }
 
@@ -447,9 +525,24 @@ export class MatchEngine {
       return;
     }
 
-    const center = (a.position + b.position) / 2;
-    a.position = clamp(center - minDistance / 2, 4, 96);
-    b.position = clamp(center + minDistance / 2, 4, 96);
+    const arenaMin = 4;
+    const arenaMax = 96;
+    const half = minDistance / 2;
+
+    let left = (a.position + b.position) / 2 - half;
+    let right = (a.position + b.position) / 2 + half;
+
+    // Re-anchor the pair on edges if center split would violate bounds.
+    if (left < arenaMin) {
+      left = arenaMin;
+      right = arenaMin + minDistance;
+    } else if (right > arenaMax) {
+      right = arenaMax;
+      left = arenaMax - minDistance;
+    }
+
+    a.position = left;
+    b.position = right;
   }
 
   private resolveStrike(
@@ -459,14 +552,17 @@ export class MatchEngine {
     defenderAction: FighterAction,
     distance: number
   ): { landed: boolean; damage: number; energySpent: number } {
-    if (action !== 'light_attack' && action !== 'heavy_attack') {
+    const attackProfiles: Record<string, { cost: number; range: number; damage: number }> = {
+      light_attack:  { cost: 18, range: 18, damage: 10 },
+      heavy_attack:  { cost: 30, range: 14, damage: 20 },
+      dash_attack:   { cost: 12, range: 22, damage: 6 },
+      special:       { cost: 55, range: 16, damage: 32 },
+    };
+
+    const profile = attackProfiles[action];
+    if (!profile) {
       return { landed: false, damage: 0, energySpent: 0 };
     }
-
-    const profile =
-      action === 'light_attack'
-        ? { cost: 20, range: 20, damage: 12 }
-        : { cost: 35, range: 14, damage: 22 };
 
     if (attacker.energy < profile.cost) {
       return { landed: false, damage: 0, energySpent: 0 };
@@ -479,12 +575,20 @@ export class MatchEngine {
     }
 
     let damage = profile.damage;
+
+    // Guard: reduce to 35% (ceil)
     if (defenderAction === 'guard') {
-      damage = Math.ceil(damage * 0.45);
+      damage = Math.ceil(damage * 0.35);
     }
 
-    if (defenderAction === 'backward' && distance > profile.range - 3) {
+    // Backward dodge: within range-6 of max range, 50% damage reduction
+    if (defenderAction === 'backward' && distance > profile.range - 6) {
       damage = Math.floor(damage * 0.5);
+    }
+
+    // Counter: defender takes 60% damage (40% reduction)
+    if (defenderAction === 'counter') {
+      damage = Math.ceil(damage * 0.6);
     }
 
     return { landed: damage > 0, damage, energySpent: profile.cost };
@@ -568,7 +672,7 @@ function clamp(value: number, min: number, max: number): number {
 
 function sanitizeDuration(value: number | undefined): number {
   if (!Number.isFinite(value) || value === undefined || value <= 0) {
-    return 120;
+    return 90;
   }
   return Math.min(300, Math.floor(value));
 }
