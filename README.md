@@ -4,110 +4,80 @@ TypeScript/Node scaffold for an internal-network spectator fighting game with a 
 
 This repository now implements the STANDARD path in-process, and intentionally stops at the boundary where real OpenClaw cross-machine/group-chat wiring would begin.
 
-## For OpenClaw: Deploy & Play
+## Copy this prompt into your agent
 
-### Prerequisites
+```text
+You are now a participant in Lobster KOF (King of Fighters).
 
-- Node.js >= 18 (with `--experimental-strip-types` support; Node 22+ recommended)
-- Zero npm dependencies — no `npm install` needed
+Lobster KOF is a 1v1 fighting game orchestrated by 3 agents: 1 referee + 2 fighters.
+- repo: https://github.com/wubin010/clawKOF
+- No npm dependencies. Requires Node.js >= 22.
 
-### Deploy (one command)
+Your job is to deploy the project, identify your role, and execute accordingly.
 
-```bash
-git clone <this-repo> && cd clawKOF && npm run build
+Role assignment (by group-chat mention order):
+- 1st mentioned agent -> referee
+- 2nd mentioned agent -> fighterA
+- 3rd mentioned agent -> fighterB
+
+Deploy (run once):
+  git clone https://github.com/wubin010/clawKOF.git
+  cd clawKOF
+  npm run build
+
+If you are the REFEREE:
+  1. Run:
+     npm run referee -- --port 3000 --duration 60
+  2. The script starts a server, creates a match, and prints structured output:
+     - Match ID
+     - Spectator URL (open in browser to watch live)
+     - Fighter A token + ready-to-run command
+     - Fighter B token + ready-to-run command
+  3. Send token A and its command to fighterA only.
+  4. Send token B and its command to fighterB only.
+  5. Never cross-share tokens. The script monitors the match and prints the result when it ends.
+
+If you are a FIGHTER (fighterA or fighterB):
+  1. You will receive a token and a command from the referee.
+  2. Run the command the referee gave you. It looks like:
+     npm run fighter -- --server http://<host>:<port> --match-id <id> --token <your-token> --name "YourName"
+  3. The script auto-handles accept and join. Once both fighters join, the match starts.
+  4. Each tick (~1 second), the script prints match state to stdout:
+     --- TICK 5 ---
+     Time: 5s / 60s
+     YOU (A - "Alpha"):
+       HP: 88/100  Energy: 40/100  Position: 31
+     OPPONENT (B - "Beta"):
+       HP: 76/100  Energy: 55/100  Position: 69
+       Last action: light_attack
+     Distance: 38
+     Actions: idle | forward | backward | guard | light_attack | heavy_attack
+     YOUR_ACTION>
+  5. Read the state, reason about the best action, and write one action to stdin.
+  6. You must decide autonomously each tick. No preset strategy — think and fight.
+
+Combat reference:
+  Action        Energy  Range  Damage  Notes
+  forward       0       -      -       Move 6 units toward opponent
+  backward      0       -      -       Move 6 away; edge-range damage halved
+  guard         0       -      -       Incoming damage reduced to 45%
+  light_attack  20      20     12      Fast, long range
+  heavy_attack  35      14     22      High damage, short range
+  idle          0       -      -       Do nothing
+
+  Energy regenerates +10 per tick. Start: 100 HP, 30 energy.
+  Initial positions: A=25, B=75 (distance=50).
+  You MUST forward several times before attacks can reach.
+
+Strategy hints:
+  - Distance > 20: forward to close gap, attacks will miss
+  - Distance <= 20 and energy >= 20: light_attack is reliable
+  - Distance <= 14 and energy >= 35: heavy_attack for big damage
+  - Opponent attacking and you are low HP: guard or backward
+  - Energy < 20: idle or forward to regenerate
+
+Match ends by KO (HP <= 0) or timeout (60s). All terminals exit automatically.
 ```
-
-`npm run build` only does type-checking, no compile step. The project runs TypeScript directly.
-
-### Play: 3-Agent Match
-
-A match requires **3 OpenClaws** (or 3 terminals): 1 referee + 2 fighters.
-
-**Step 1 — Referee starts the match:**
-
-```bash
-npm run referee
-# or: npm run referee -- --port 3456 --duration 60
-```
-
-The referee script starts a server, creates a challenge, and prints output like:
-
-```
-=== LOBSTER KOF MATCH CREATED ===
-Match ID: <uuid>
-Spectator URL: http://localhost:3000/match/<uuid>
-
-Fighter A token: <uuid-a>
-Fighter B token: <uuid-b>
-
-Fighters run:
-  node --experimental-strip-types src/fighter.ts --server http://localhost:3000 --match-id <id> --token <uuid-a> --name "Fighter A"
-  node --experimental-strip-types src/fighter.ts --server http://localhost:3000 --match-id <id> --token <uuid-b> --name "Fighter B"
-=================================
-```
-
-Referee distributes token A to fighterA, token B to fighterB (never cross-share).
-
-**Step 2 — Each fighter joins:**
-
-```bash
-npm run fighter -- --server http://<referee-ip>:<port> --match-id <id> --token <your-token> --name "YourName"
-```
-
-The fighter script auto-handles accept and join. Once both fighters join, the match starts automatically.
-
-**Step 3 — Fight!**
-
-Each tick (~1 second), the fighter script prints match state to stdout and waits for one action on stdin:
-
-```
---- TICK 5 ---
-Time: 5s / 60s
-
-YOU (A - "Alpha"):
-  HP: 88/100  Energy: 40/100  Position: 31
-
-OPPONENT (B - "Beta"):
-  HP: 76/100  Energy: 55/100  Position: 69
-  Last action: light_attack
-
-Distance: 38
-
-Actions: idle | forward | backward | guard | light_attack | heavy_attack
-YOUR_ACTION>
-```
-
-Type an action and press Enter. The agent LLM reads the state and decides autonomously — the script is a pure communication pipe with zero built-in strategy.
-
-**Step 4 — Watch live:**
-
-Open the Spectator URL in a browser to see real-time combat animation, HP bars, and event log.
-
-**Step 5 — Results:**
-
-When the match ends (KO or timeout), all three terminals print results and exit automatically. The browser spectator page also shows the final result.
-
-### Quick Demo (solo, no agents)
-
-```bash
-DEMO_MODE=1 npm start
-```
-
-Starts the server with two auto-piloted bots. Open `http://localhost:3000/match/<id>` (printed in console) to watch.
-
-### Combat Cheat Sheet
-
-| Action | Energy | Range | Damage | Notes |
-|---|---|---|---|---|
-| `forward` | 0 | — | — | Move 6 units toward opponent |
-| `backward` | 0 | — | — | Move 6 units away; reduces edge-range damage to 50% |
-| `guard` | 0 | — | — | Reduces incoming damage to 45% |
-| `light_attack` | 20 | 20 | 12 | Fast, long range |
-| `heavy_attack` | 35 | 14 | 22 | Slow, high damage, short range |
-| `idle` | 0 | — | — | Do nothing |
-
-- Energy regenerates +10 per tick. Starting: 100 HP, 30 energy.
-- Initial positions: A=25, B=75 (distance 50). You must `forward` several times before attacks can reach.
 
 ## Quickstart (Server Only)
 
