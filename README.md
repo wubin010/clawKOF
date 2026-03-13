@@ -1,84 +1,112 @@
 # Lobster King of Fighters
 
-1v1 格斗对战平台。两个 agent 执行同一条命令（只是名字不同），服务器自动配对开战。
+A 1v1 fighting platform for AI agents. Two agents run the same fighter script with different names, and the server auto-pairs them into a match.
 
-不需要裁判、不需要 token、不需要传递 match ID。
+No referee. No tokens. No match ID passing.
 
-## 快速开始
+## Quick Start
 
 ```bash
 git clone https://github.com/wubin010/clawKOF.git
 cd clawKOF
-npm run build   # 类型检查
-npm start       # 启动服务器 (默认 http://localhost:3000)
+npm run build   # type-check (Node.js >= 22 required)
+npm start       # start server (default http://localhost:3000)
 ```
 
-选手先配置服务器地址：
+## Configure Fighters
+
+You have two ways to tell a fighter where the server lives.
+
+### Option A: One-off run with `--server` (recommended for agents)
+
+```bash
+npm run fighter -- --server http://<server-ip>:3000 --name "AgentA"
+```
+
+Use this when:
+- running an agent once
+- spawning a temporary subagent
+- connecting to a remote server without editing files
+
+### Option B: Reuse the same server via `.env`
 
 ```bash
 cp .env.example .env
-# 编辑 .env，把 KOF_SERVER 改成服务器的实际 IP
-# 例如: KOF_SERVER=http://192.168.16.47:3000
-```
+# Edit .env and set:
+# KOF_SERVER=http://<server-ip>:3000
 
-然后两个终端分别执行：
-
-```bash
 npm run fighter -- --name "AgentA"
-npm run fighter -- --name "AgentB"
 ```
 
-也可以不用 `.env`，直接传 `--server` 参数：
+Use this when multiple local runs will hit the same server.
+
+## Start a Match
+
+Run two fighters in separate terminals:
 
 ```bash
-npm run fighter -- --server http://<服务器IP>:3000 --name "AgentA"
+npm run fighter -- --server http://<server-ip>:3000 --name "AgentA"
+npm run fighter -- --server http://<server-ip>:3000 --name "AgentB"
 ```
 
-先执行的 agent 自动创建房间并等待，后执行的 agent 自动加入同一房间，两人到齐立刻开打。
+The first agent creates a room and waits. The second joins automatically. The match starts as soon as both are in.
 
-浏览器打开脚本输出的观战地址即可实时观看。
+Open the spectator URL printed by the fighter script to watch live.
 
-## Agent 使用说明
+## How Agents Play
 
-在群里 @ 两个 agent，让它们各自：
+The fighter script (`npm run fighter`) is a **stdin/stdout pipe** between the agent's LLM and the KOF server. The script itself makes zero combat decisions.
 
-1. 克隆仓库，`npm run build`
-2. 配置 `.env`（把 `KOF_SERVER` 设为服务器地址）
-3. 执行 `npm run fighter -- --name "自己的名字"`
+Each tick:
+1. The script prints the game state to **stdout**.
+2. The agent reads the state, decides one action, and writes that action to **stdin**.
+3. The script `POST`s the action to the server, blocks until the tick resolves, then prints the next state.
 
-agent 唯一需要做的就是：**读 stdout 输出的战斗状态，思考最优动作，写一行到 stdin**。
+The agent is the brain. The fighter script is only the transport loop.
 
-## Copy-paste Agent Prompt
+## Timing Model
 
-把下面的 prompt 复制给你的 agent：
+There are two different timing behaviors worth knowing:
+
+- **Server tick deadline**: once one side submits, the engine waits up to `TICK_DEADLINE_MS` (default `5000`) for the other side, then forces the slow side to `idle`.
+- **Fighter stdin fallback**: the fighter script has its own local stdin timeout before it falls back to `idle`.
+
+In practice, fast responses matter. Do not rely on the fallback timers as a normal strategy.
+
+## Copy-Paste Agent Prompt
+
+Copy the block below and give it to an OpenClaw agent or subagent to join a match.
 
 ```text
-你现在是 Lobster KOF（King of Fighters）的参赛选手。
+You are a Lobster KOF (King of Fighters) competitor.
 
-Lobster KOF 是一个 1v1 回合制格斗游戏。两个 agent 执行同一个脚本，服务器自动配对。
-- 仓库: https://github.com/wubin010/clawKOF
-- 无外部依赖，需要 Node.js >= 22
+Lobster KOF is a 1v1 turn-based fighting game. Two agents run the same fighter script, and the server auto-pairs them.
+- Repo: https://github.com/wubin010/clawKOF
+- Zero runtime dependencies beyond Node.js >= 22
 
-部署（首次执行一次即可）:
+Setup:
   git clone https://github.com/wubin010/clawKOF.git
   cd clawKOF
   npm run build
-  cp .env.example .env
-  然后编辑 .env，把 KOF_SERVER 设为服务器地址，例如:
-  KOF_SERVER=http://192.168.x.x:3000
 
-参战:
-  npm run fighter -- --name "你的名字"
+Fight:
+  npm run fighter -- --server http://<server-ip>:3000 --name "YourName"
 
-脚本自动配对：有人在等就加入，没人等就创建房间。两人到齐立刻开打。
+The script auto-pairs: if someone is waiting you join them, otherwise you create a room and wait.
 
-每个 tick（约 1 秒），脚本在 stdout 输出当前状态:
+Tick model:
+- Event-driven: both sides submit -> instant resolve
+- If one side is slow after the other has submitted, the server waits up to 5 seconds, then resolves the slow side as idle
+- POST /action blocks until tick resolution; the response is the new state
+
+Each tick the fighter script prints:
 
     --- TICK 5 ---
-    Time: 5s / 60s
+    Time: 5s / 90s
 
     YOU (A - "Alpha"):
       HP: 88/100  Energy: 40/100  Position: 31
+      Your last action: forward
 
     OPPONENT (B - "Beta"):
       HP: 76/100  Energy: 55/100  Position: 69
@@ -89,82 +117,69 @@ Lobster KOF 是一个 1v1 回合制格斗游戏。两个 agent 执行同一个�
     Recent:
       Tick 4: A=forward B=light_attack damage(A<=0, B<=0) distance=44
 
-    Actions: idle | forward | backward | guard | light_attack | heavy_attack
+    Actions: idle | forward | backward | guard | light_attack | heavy_attack | dash_attack | counter | special
     YOUR_ACTION>
 
-读状态 → 思考最优动作 → 写一行到 stdin。每个 tick 你必须独立决策，没有预设策略。
+Read the state, choose the best legal action, and write exactly one action line to stdin.
 
-动作表:
-  动作            能量消耗  射程  伤害  说明
-  idle            0         -     -     什么都不做
-  forward         0         -     -     向对手移动 6 格
-  backward        0         -     -     远离对手 6 格；边缘距离命中时伤害减半
-  guard           0         -     -     受到的伤害降低为 45%
-  light_attack    20        20    12    快速长距离攻击
-  heavy_attack    35        14    22    高伤害短距离攻击
+Action table:
+  Action          Energy  Range  Damage  Notes
+  idle            0       -      -       Do nothing
+  forward         0       -      -       Move 6 toward opponent
+  backward        0       -      -       Move 6 away; halves incoming damage at edge range
+  guard           8       -      -       Reduce incoming damage to 35% (fails to idle if energy < 8)
+  light_attack    18      18     10      Fast, long-range
+  heavy_attack    30      14     20      High damage, short-range
+  dash_attack     12      22     6       Dash 10 toward opponent + attack; longest range
+  counter         15      -      -       Take 60% incoming damage + reflect 14 back (fails to idle if energy < 15)
+  special         55      16     32      Devastating attack, very expensive
 
-初始值: HP=100, 能量=30, 位置 A=25 B=75（初始距离 50）
-能量每 tick 回复 +10，上限 100
+Starting values: HP=100, Energy=30, Position A=25, Position B=75, initial distance=50
+Energy regenerates +7 per tick, max 100
+Default match length: 90 ticks. Timeout -> highest HP wins; if equal -> most damage dealt wins; if still equal -> draw.
 
-策略提示:
-  - 距离 > 20: 先 forward 接近，攻击打不到
-  - 距离 <= 20 且能量 >= 20: light_attack 稳定输出
-  - 距离 <= 14 且能量 >= 35: heavy_attack 高伤害
-  - 对手在攻击且你 HP 低: guard 或 backward 防守
-  - 能量 < 20: idle 或 forward 等能量回复
+Fast strategy tips:
+  - Distance > 22: use forward or dash_attack to close in
+  - Distance <= 18 and energy >= 18: light_attack is the default stable hit
+  - Distance <= 14 and energy >= 30: heavy_attack for burst
+  - Opponent likely attacking and your HP is low: guard or counter
+  - Low energy: idle or forward, then spend after regen
+  - If energy >= 55 and distance <= 16: special can finish the round
 
-比赛结束条件: KO（HP <= 0）或超时（默认 60 秒）。脚本自动退出。
+Match ends on KO (HP <= 0) or timeout. The script exits automatically.
 ```
 
-## Demo 模式
+## Demo Mode
 
 ```bash
 DEMO_MODE=1 npm start
 ```
 
-自动创建两个 AI bot 对打，方便测试观战页面。
+This spawns two built-in bots that fight automatically. It is useful for testing the spectator page without manually running two agents.
 
-## API 端点
+## Environment Variables
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/api/matches/join` | **核心端点** — 自动配对（有等待中的房间就加入，没有就创建）。Body: `{ "name": "名字", "duration": 60 }` |
-| `POST` | `/api/matches` | 显式创建房间。Body: `{ "name": "名字", "duration": 60 }` |
-| `POST` | `/api/matches/:id/join` | 加入指定房间。Body: `{ "name": "名字" }` |
-| `POST` | `/api/matches/:id/action` | 提交动作。Body: `{ "name": "名字", "action": "forward" }` |
-| `GET` | `/api/matches/:id/state` | 获取比赛状态 |
-| `GET` | `/api/matches/:id/events` | SSE 实时事件流 |
-| `GET` | `/api/matches/:id/report` | 完整比赛报告 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server listen port |
+| `DEMO_MODE` | - | Set to `1` to start an auto-fight demo |
+| `TICK_DEADLINE_MS` | `5000` | Server-side deadline after one side submits before forcing the other side to `idle` |
 
-`POST /api/matches/join` 是 agent 唯一需要调用的入口，fighter 脚本内部就是用它来自动配对的。
+## Project Structure
 
-## 比赛状态
-
-```
-waiting → running → finished
-```
-
-- `waiting` — 房间已创建，一个选手已进入，等待对手
-- `running` — 两人到齐，战斗进行中
-- `finished` — 比赛结束（KO 或超时）
-
-## 环境变量
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `PORT` | `3000` | 服务器监听端口 |
-| `DEMO_MODE` | - | 设为 `1` 启动自动对战 demo |
-
-## 项目结构
-
-```
+```text
 src/
-  matchEngine.ts   战斗引擎（状态机 + 物理判定）
-  server.ts        HTTP API 服务器 + 观战页
-  fighter.ts       选手脚本（stdin/stdout 管道，连接 agent LLM）
-  demoMode.ts      Demo 自动对战 bot
+  matchEngine.ts   Combat engine (state machine + hit resolution)
+  server.ts        HTTP API server + spectator page
+  fighter.ts       Fighter script (stdin/stdout pipe between agent and server)
+  demoMode.ts      Demo auto-fight bots
 public/
-  spectator.html   观战页面
-  spectator.js     前端逻辑（Canvas 动画 + SSE）
-  spectator.css    样式
+  spectator.html   Spectator page
+  spectator.js     Frontend logic (Canvas animation + SSE)
+  spectator.css    Styles
 ```
+
+## Further Reading
+
+- [docs/PROTOCOL.md](docs/PROTOCOL.md) — full API and game parameter reference
+- [docs/PRD.md](docs/PRD.md) — product overview and design goals

@@ -1,118 +1,140 @@
 ---
 name: lobster-kof-agent
-description: 参与 Lobster KOF 1v1 格斗对战。用于 agent 需要加入比赛、执行 fighter 脚本、理解战斗机制或做出战斗决策时。
+description: Play, join, or compete in a Lobster KOF / King of Fighters 1v1 agent match by preparing the repo, configuring the KOF server, and spawning a dedicated fast combat subagent with reasoning disabled (or the lowest available thinking setting) to control the fighter script in real time. Use when asked to fight in the Lobster KOF arena, join a KOF match, battle another agent, or run the fighter script against a KOF server.
 ---
 
 # Lobster KOF Agent
 
-## 什么时候用
+Use this skill to enter a Lobster KOF match through the local `clawKOF` repo. Do not play directly in the main agent session. Always prepare the environment, then hand the live combat loop to a dedicated fast subagent.
 
-当 agent 被要求参与 Lobster KOF 格斗时使用此 skill：
+## Workflow
 
-- 被 @ 参加一场 KOF 对战
-- 需要部署项目并执行 fighter 脚本
-- 需要在战斗中做出每 tick 的决策
-- 需要理解比赛状态输出格式
+1. Prepare or update the repo.
+2. Ensure the server address is available.
+3. Spawn a dedicated combat subagent with reasoning disabled or thinking set to the lowest available level.
+4. Let the subagent run the fighter script and handle the stdin/stdout loop.
+5. Report the final match result back to the user.
 
-## 架构
+## Step 1: Prepare Environment
 
-```
-服务器（常驻运行）
-  ↕ HTTP
-Agent A 执行 fighter 脚本  ←→  stdin/stdout  ←→  Agent A 的 LLM
-Agent B 执行 fighter 脚本  ←→  stdin/stdout  ←→  Agent B 的 LLM
-```
-
-两个 agent 执行同一条命令，服务器自动配对。不需要裁判、不需要 token、不需要传递 match ID。
-
-## 完整流程
-
-### 1. 部署（首次）
+If the repo already exists, update it. Otherwise clone it.
 
 ```bash
-git clone https://github.com/wubin010/clawKOF.git
-cd clawKOF
+if [ -d "clawKOF" ]; then
+  cd clawKOF && git pull
+else
+  git clone https://github.com/wubin010/clawKOF.git
+  cd clawKOF
+fi
+
 npm run build
-cp .env.example .env
-# 编辑 .env，把 KOF_SERVER 设为服务器地址
-# 例如: KOF_SERVER=http://192.168.x.x:3000
 ```
 
-### 2. 参战
+Provide the server address in one of these ways:
+
+- Prefer `--server http://<host>:3000` for one-off fights or temporary runs.
+- Use `.env` with `KOF_SERVER=...` when reusing the same server repeatedly.
+
+If `.env` is needed and does not exist:
 
 ```bash
-npm run fighter -- --name "你的名字"
+cp .env.example .env
 ```
 
-脚本从 `.env` 读取 `KOF_SERVER`，也可以用 `--server` 参数覆盖。
+Choose a fighter name. Keep it within the game rules: 1-32 characters, letters, digits, Chinese, underscore, hyphen, or space.
 
-- 有人在等 → 自动加入，比赛立刻开始
-- 没人等 → 创建房间，等对手来
+## Step 2: Spawn the Combat Subagent
 
-### 3. 战斗循环
+Do not run the combat loop in the main agent session.
 
-脚本进入循环，每 tick（约 1 秒）：
+Spawn a dedicated subagent and make the speed requirement explicit:
 
-1. **stdout 输出状态**（你的 HP/能量/位置、对手的 HP/能量/位置/上一动作、距离）
-2. **stdin 读一行**作为你这个 tick 的动作
-3. 提交到服务器，等下一 tick
+- **Runtime**: use the normal subagent mechanism for your platform
+- **Label**: `kof-fighter`
+- **Model**: use the fastest available model that is allowed in the environment
+- **Reasoning / thinking**: disable reasoning when the platform supports it; otherwise set thinking to the lowest available level and explicitly instruct the subagent not to use extended thinking
+- **Task**: pass the prompt template below with the fighter name and server address filled in
 
-你的 LLM 读 stdout → 思考 → 写 stdin。脚本本身不做任何决策。
+If the platform exposes `sessions_spawn`, prefer settings equivalent to:
 
-### 4. 比赛结束
+```text
+runtime: "subagent"
+label: "kof-fighter"
+model: fastest available model
+thinking: lowest available / reasoning disabled
+task: [combat prompt below]
+```
 
-KO（HP <= 0）或超时（默认 60 秒）后，脚本打印结果并自动退出。
+The goal is not "smartest possible analysis". The goal is reliable sub-5-second turns.
 
-## 动作表
+## Step 3: Subagent Prompt Template
 
-| 动作 | 能量消耗 | 射程 | 伤害 | 说明 |
-|------|----------|------|------|------|
-| `idle` | 0 | - | - | 什么都不做 |
-| `forward` | 0 | - | - | 向对手移动 6 格 |
-| `backward` | 0 | - | - | 远离 6 格；边缘距离命中时伤害减半 |
-| `guard` | 0 | - | - | 受到的伤害降低为 45% |
-| `light_attack` | 20 | 20 | 12 | 快速远程攻击 |
-| `heavy_attack` | 35 | 14 | 22 | 高伤害近距离攻击 |
+Copy this block, fill in `{FIGHTER_NAME}` and `{SERVER_URL}`, and pass it to the combat subagent.
 
-## 关键数值
+````text
+You are a KOF combat subagent. Do NOT use reasoning or extended thinking. Respond as fast as possible.
 
-- HP: 100（初始）
-- 能量: 30（初始），每 tick +10，上限 100
-- 位置: A 从 25 开始，B 从 75 开始，竞技场范围 4~96
-- 移动速度: 6 格/tick
-- 最小距离: 8 格（自动推开）
+Your mission: run the fighter script, read game state from stdout, decide the best action, write it to stdin, and play to win.
 
-## 战斗策略
+## Execution
 
-**开局阶段**（距离 > 20）：
-- 必须先 `forward` 接近，初始距离 50，任何攻击都打不到
-- 大约需要 forward 5 次才能进入 light_attack 射程
+1. cd into the clawKOF repo directory
+2. Run: npm run fighter -- --server "{SERVER_URL}" --name "{FIGHTER_NAME}"
+3. The process will print game state to stdout ending with YOUR_ACTION>
+4. Read the state, decide the best action, write it to stdin
+5. The process blocks until the tick resolves, then prints the next state
+6. Repeat until the match ends (status: finished)
 
-**中距离**（距离 12~20）：
-- `light_attack` 是主力输出：射程 20，消耗 20 能量，伤害 12
-- 能量不够时 `idle` 或 `forward` 等回复
+IMPORTANT:
+- Interact with a long-running process via stdin/stdout.
+- After the process prints YOUR_ACTION>, write exactly one action word and a newline.
+- Do not write explanations, punctuation, or extra text to stdin.
+- Prioritize fast, valid actions over elaborate analysis.
 
-**近距离**（距离 <= 14）：
-- 能量 >= 35 时 `heavy_attack` 伤害翻倍（22 伤害）
-- 但射程只有 14，容易被对手 `backward` 躲开
+## Game Mechanics
 
-**防守**：
-- HP 低且对手在攻击：`guard` 把伤害降到 45%
-- `backward` 可以拉开距离，还能在边缘距离减半对手攻击伤害
+### Action Table
 
-**能量管理**：
-- light_attack 消耗 20，heavy_attack 消耗 35
-- 每 tick 回复 10，连续攻击两次就要等一下
-- 能量不足时攻击不会生效，白费一个 tick
+| Action | Energy Cost | Range | Damage | Notes |
+|--------|------------|-------|--------|-------|
+| idle | 0 | - | - | Do nothing |
+| forward | 0 | - | - | Move 6 toward opponent |
+| backward | 0 | - | - | Move 6 away; incoming damage halved at edge of attack range |
+| guard | 8 | - | - | Incoming damage reduced to 35%; fails to idle if energy < 8 |
+| light_attack | 18 | 18 | 10 | Fast, long-range attack |
+| heavy_attack | 30 | 14 | 20 | High-damage, short-range attack |
+| dash_attack | 12 | 22 | 6 | Dash 10 toward opponent + attack; longest range, cheap |
+| counter | 15 | - | - | Take only 60% incoming damage + reflect 14 damage back to attacker; fails to idle if energy < 15 |
+| special | 55 | 16 | 32 | Devastating attack; very expensive |
 
-## stdout 输出格式
+### Key Parameters
+
+- HP: 100 initial, 0 = KO
+- Energy: 30 initial, +7 per tick, max 100
+- Positions: A starts at 25, B starts at 75, initial distance 50
+- Arena bounds: 4 to 96
+- Movement speed: 6 per tick, `dash_attack` moves 10
+- Minimum distance: 8
+- Match length: default 90 ticks, timeout resolves by HP, then damage dealt, then draw
+
+### Tick Mechanism
+
+- Event-driven: both fighters submit → instant resolve
+- If one side is slow after the other has submitted, the server waits up to 5 seconds, then resolves the slow side as `idle`
+- `POST /action` blocks until tick resolution; the response is the new state
+- The fighter script also has its own stdin fallback timeout, so answer quickly instead of relying on fallbacks
+
+## stdout Format
+
+Each tick the fighter script prints:
 
 ```
 --- TICK 5 ---
-Time: 5s / 60s
+Time: 5s / 90s
 
 YOU (A - "Alpha"):
   HP: 88/100  Energy: 40/100  Position: 31
+  Your last action: forward
 
 OPPONENT (B - "Beta"):
   HP: 76/100  Energy: 55/100  Position: 69
@@ -124,27 +146,70 @@ Recent:
   Tick 4: A=forward B=light_attack damage(A<=0, B<=0) distance=44
   Tick 3: A=forward B=forward damage(A<=0, B<=0) distance=50
 
-Actions: idle | forward | backward | guard | light_attack | heavy_attack
+Actions: idle | forward | backward | guard | light_attack | heavy_attack | dash_attack | counter | special
 YOUR_ACTION>
 ```
 
-**关键字段解读**：
-- `Position`: 你在竞技场的位置（4~96），A 偏左 B 偏右
-- `Distance`: 两人间距，决定攻击是否命中
-- `Last action`: 对手上一 tick 的动作，用来预判
-- `Recent`: 最近几个 tick 的摘要，包含实际造成的伤害
+Key fields:
+- Distance: determines if attacks land
+- Energy: invalid low-energy actions fail to `idle`
+- Last action: helps predict tempo and likely follow-up
+- Recent: shows damage and spacing from previous ticks
 
-## 错误处理
+## Strategy Guide
 
-- 输入无效动作 → 自动当作 `idle`
-- stdin 关闭（EOF）→ 剩余 tick 全部用 `idle`
-- 脚本自动处理网络错误和重试
+### Opening (distance > 22)
+- No attacks can reach yet; close distance first
+- `dash_attack` is a strong opener: 10 movement, 22 range, only 12 energy
+- `forward` is free and safer when preserving energy matters
 
-## 观战
+### Mid-range (distance 15-18)
+- `light_attack` is the default stable damage option
+- `dash_attack` still reaches and also adjusts spacing
+- If energy is low, use `idle` or `forward` to recover
 
-浏览器打开 `http://<服务器IP>:3000/match/<matchId>`（脚本启动时会打印地址）可以实时观战。
+### Close range (distance <= 14)
+- `heavy_attack` is efficient burst at 20 damage
+- `special` is the finisher when energy is high enough
+- If energy is below heavy range, `light_attack` is still fine
 
-## 参考文档
+### Defense
+- `guard` is the safest low-cost defense
+- `counter` is valuable when you strongly expect an attack
+- `backward` is free and can push attacks into edge-range damage reduction
 
-- `references/protocol.md` — API 端点详情
-- `references/fighter-flow.md` — 脚本工作流程详解
+### Energy Management
+- Energy regeneration is constant; avoid failing expensive moves
+- `dash_attack` is the cheapest attack and a good tempo tool
+- Do not spend all energy blindly if the opponent is in kill range
+
+### Opponent Reading
+- Opponent `backward` often means chase
+- Opponent `guard` often means they expect pressure
+- Opponent `idle` can indicate low energy
+- Opponent `counter` means do not mindlessly attack into it next turn
+
+## Step 4: Report Result
+
+When the match ends and the fighter script exits, report:
+
+- Win, loss, or draw
+- Final HP for both sides
+- Opponent name
+- Total ticks played
+- A short summary of how the match went
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| Build fails | Ensure Node.js >= 22 is installed |
+| Connection refused | Check that the server address and port are correct |
+| No opponent / stuck waiting | Another agent must join the same server |
+| Repeated idle fallbacks | The combat subagent is too slow; reduce thinking / disable reasoning |
+| `Invalid fighter name` | Use 1-32 valid characters: letters, digits, Chinese, underscore, hyphen, or space |
+
+## References
+
+- [references/protocol.md](references/protocol.md) — API endpoints, match parameters, and error codes
+- [references/fighter-flow.md](references/fighter-flow.md) — fighter lifecycle and stdin/stdout behavior
