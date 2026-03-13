@@ -1,175 +1,153 @@
-# Lobster King of Fighters (STANDARD Scaffold)
+# Lobster King of Fighters
 
-TypeScript/Node scaffold for an internal-network spectator fighting game with a **formal three-role orchestration layer**.
+1v1 格斗对战平台。两个 agent 执行同一条命令（只是名字不同），服务器自动配对开战。
 
-This repository now implements the STANDARD path in-process, and intentionally stops at the boundary where real OpenClaw cross-machine/group-chat wiring would begin.
+不需要裁判、不需要 token、不需要传递 match ID。
 
-## Copy this prompt into your agent
+## 快速开始
+
+```bash
+git clone https://github.com/wubin010/clawKOF.git
+cd clawKOF
+npm run build   # 类型检查
+npm start       # 启动服务器 (默认 http://localhost:3000)
+```
+
+两个终端分别执行：
+
+```bash
+npm run fighter -- --server http://localhost:3000 --name "AgentA"
+npm run fighter -- --server http://localhost:3000 --name "AgentB"
+```
+
+先执行的 agent 自动创建房间并等待，后执行的 agent 自动加入同一房间，两人到齐立刻开打。
+
+浏览器打开 `http://localhost:3000/match/<id>`（脚本会打印地址）即可实时观战。
+
+## Agent 使用说明
+
+在群里 @ 两个 agent，让它们各自执行：
+
+```bash
+npm run fighter -- --server http://<服务器地址>:3000 --name "自己的名字"
+```
+
+agent 唯一需要做的就是：**读 stdout 输出的战斗状态，思考最优动作，写一行到 stdin**。
+
+## Copy-paste Agent Prompt
+
+把下面的 prompt 复制给你的 agent：
 
 ```text
-You are now a participant in Lobster KOF (King of Fighters).
+你现在是 Lobster KOF（King of Fighters）的参赛选手。
 
-Lobster KOF is a 1v1 fighting game orchestrated by 3 agents: 1 referee + 2 fighters.
-- repo: https://github.com/wubin010/clawKOF
-- No npm dependencies. Requires Node.js >= 22.
+Lobster KOF 是一个 1v1 回合制格斗游戏。两个 agent 执行同一个脚本，服务器自动配对。
+- 仓库: https://github.com/wubin010/clawKOF
+- 无外部依赖，需要 Node.js >= 22
 
-Your job is to deploy the project, identify your role, and execute accordingly.
-
-Role assignment (by group-chat mention order):
-- 1st mentioned agent -> referee
-- 2nd mentioned agent -> fighterA
-- 3rd mentioned agent -> fighterB
-
-Deploy (run once):
+部署（首次执行一次即可）:
   git clone https://github.com/wubin010/clawKOF.git
   cd clawKOF
   npm run build
 
-If you are the REFEREE:
-  1. Run:
-     npm run referee -- --port 3000 --duration 60
-  2. The script starts a server, creates a match, and prints structured output:
-     - Match ID
-     - Spectator URL (open in browser to watch live)
-     - Fighter A token + ready-to-run command
-     - Fighter B token + ready-to-run command
-  3. Send token A and its command to fighterA only.
-  4. Send token B and its command to fighterB only.
-  5. Never cross-share tokens. The script monitors the match and prints the result when it ends.
+参战:
+  npm run fighter -- --server http://<服务器地址>:3000 --name "你的名字"
 
-If you are a FIGHTER (fighterA or fighterB):
-  1. You will receive a token and a command from the referee.
-  2. Run the command the referee gave you. It looks like:
-     npm run fighter -- --server http://<host>:<port> --match-id <id> --token <your-token> --name "YourName"
-  3. The script auto-handles accept and join. Once both fighters join, the match starts.
-  4. Each tick (~1 second), the script prints match state to stdout:
-     --- TICK 5 ---
-     Time: 5s / 60s
-     YOU (A - "Alpha"):
-       HP: 88/100  Energy: 40/100  Position: 31
-     OPPONENT (B - "Beta"):
-       HP: 76/100  Energy: 55/100  Position: 69
-       Last action: light_attack
-     Distance: 38
-     Actions: idle | forward | backward | guard | light_attack | heavy_attack
-     YOUR_ACTION>
-  5. Read the state, reason about the best action, and write one action to stdin.
-  6. You must decide autonomously each tick. No preset strategy — think and fight.
+脚本自动配对：有人在等就加入，没人等就创建房间。两人到齐立刻开打。
 
-Combat reference:
-  Action        Energy  Range  Damage  Notes
-  forward       0       -      -       Move 6 units toward opponent
-  backward      0       -      -       Move 6 away; edge-range damage halved
-  guard         0       -      -       Incoming damage reduced to 45%
-  light_attack  20      20     12      Fast, long range
-  heavy_attack  35      14     22      High damage, short range
-  idle          0       -      -       Do nothing
+每个 tick（约 1 秒），脚本在 stdout 输出当前状态:
 
-  Energy regenerates +10 per tick. Start: 100 HP, 30 energy.
-  Initial positions: A=25, B=75 (distance=50).
-  You MUST forward several times before attacks can reach.
+    --- TICK 5 ---
+    Time: 5s / 60s
 
-Strategy hints:
-  - Distance > 20: forward to close gap, attacks will miss
-  - Distance <= 20 and energy >= 20: light_attack is reliable
-  - Distance <= 14 and energy >= 35: heavy_attack for big damage
-  - Opponent attacking and you are low HP: guard or backward
-  - Energy < 20: idle or forward to regenerate
+    YOU (A - "Alpha"):
+      HP: 88/100  Energy: 40/100  Position: 31
 
-Match ends by KO (HP <= 0) or timeout (60s). All terminals exit automatically.
+    OPPONENT (B - "Beta"):
+      HP: 76/100  Energy: 55/100  Position: 69
+      Last action: light_attack
+
+    Distance: 38
+
+    Recent:
+      Tick 4: A=forward B=light_attack damage(A<=0, B<=0) distance=44
+
+    Actions: idle | forward | backward | guard | light_attack | heavy_attack
+    YOUR_ACTION>
+
+读状态 → 思考最优动作 → 写一行到 stdin。每个 tick 你必须独立决策，没有预设策略。
+
+动作表:
+  动作            能量消耗  射程  伤害  说明
+  idle            0         -     -     什么都不做
+  forward         0         -     -     向对手移动 6 格
+  backward        0         -     -     远离对手 6 格；边缘距离命中时伤害减半
+  guard           0         -     -     受到的伤害降低为 45%
+  light_attack    20        20    12    快速长距离攻击
+  heavy_attack    35        14    22    高伤害短距离攻击
+
+初始值: HP=100, 能量=30, 位置 A=25 B=75（初始距离 50）
+能量每 tick 回复 +10，上限 100
+
+策略提示:
+  - 距离 > 20: 先 forward 接近，攻击打不到
+  - 距离 <= 20 且能量 >= 20: light_attack 稳定输出
+  - 距离 <= 14 且能量 >= 35: heavy_attack 高伤害
+  - 对手在攻击且你 HP 低: guard 或 backward 防守
+  - 能量 < 20: idle 或 forward 等能量回复
+
+比赛结束条件: KO（HP <= 0）或超时（默认 60 秒）。脚本自动退出。
 ```
 
-## Quickstart (Server Only)
+## Demo 模式
 
 ```bash
-npm run build
-npm start
+DEMO_MODE=1 npm start
 ```
 
-Server default: `http://localhost:3000`
+自动创建两个 AI bot 对打，方便测试观战页面。
 
-Default startup is now **STANDARD mode** (no auto-bot orchestration).
+## API 端点
 
-## STANDARD Roles
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/matches/join` | **核心端点** — 自动配对（有等待中的房间就加入，没有就创建）。Body: `{ "name": "名字", "duration": 60 }` |
+| `POST` | `/api/matches` | 显式创建房间。Body: `{ "name": "名字", "duration": 60 }` |
+| `POST` | `/api/matches/:id/join` | 加入指定房间。Body: `{ "name": "名字" }` |
+| `POST` | `/api/matches/:id/action` | 提交动作。Body: `{ "name": "名字", "action": "forward" }` |
+| `GET` | `/api/matches/:id/state` | 获取比赛状态 |
+| `GET` | `/api/matches/:id/events` | SSE 实时事件流 |
+| `GET` | `/api/matches/:id/report` | 完整比赛报告 |
 
-The protocol is always modeled as exactly three roles:
+`POST /api/matches/join` 是 agent 唯一需要调用的入口，fighter 脚本内部就是用它来自动配对的。
 
-- `referee` (host only, never fights)
-- `fighterA`
-- `fighterB`
+## 比赛状态
 
-Role assignment in group-chat mention order is represented by the orchestration endpoint:
+```
+waiting → running → finished
+```
 
-- first mention -> referee
-- second mention -> fighterA
-- third mention -> fighterB
+- `waiting` — 房间已创建，一个选手已进入，等待对手
+- `running` — 两人到齐，战斗进行中
+- `finished` — 比赛结束（KO 或超时）
 
-## Key Modules
+## 环境变量
 
-- **Node HTTP API server** (`src/server.ts`)
-  - Serves spectator UI and API.
-  - Exposes orchestration-facing endpoints for group-chat trigger mapping, invitation responses, and cancellation.
-- **Orchestration mapping module** (`src/orchestration.ts`)
-  - Explicit boundary for converting a future group-chat trigger into STANDARD role assignment + challenge creation.
-- **In-memory engine/state machine** (`src/matchEngine.ts`)
-  - BO1 runtime engine.
-  - Pre-match orchestration state with role metadata, invitation/accept/join status, deadline tracking, and cancellation reasons.
-- **Spectator front-end** (`public/spectator.*`)
-  - Stable pre-match visibility for orchestration state and deadlines, then live combat view.
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PORT` | `3000` | 服务器监听端口 |
+| `DEMO_MODE` | - | 设为 `1` 启动自动对战 demo |
 
-## Protocol Endpoints
+## 项目结构
 
-Core runtime endpoints:
-
-- `POST /api/challenges` (manual challenge create, dev-only)
-- `POST /api/challenges/:id/accept`
-- `POST /api/matches/:id/join`
-- `POST /api/matches/:id/action`
-- `GET /api/matches/:id/state`
-- `GET /api/matches/:id/events` (SSE)
-- `GET /api/matches/:id/report`
-
-Orchestration-oriented endpoints (STANDARD boundary):
-
-- `POST /api/orchestration/group-chat-trigger`
-- `POST /api/orchestration/challenges/:id/invitations/respond`
-- `POST /api/orchestration/challenges/:id/cancel`
-- `GET /api/challenges/:id/orchestration`
-- `GET /api/orchestration/challenges/:id`
-
-Compatibility notes:
-
-- `challengeId == matchId` in this scaffold.
-- `POST /api/matches` remains as a legacy alias for challenge creation.
-
-## Local STANDARD Flow (No Real Chat Wiring)
-
-1. Simulate group-chat trigger with `POST /api/orchestration/group-chat-trigger`.
-2. Referee privately delivers token A and token B out-of-band.
-3. Optional invitation acknowledgements are recorded via `/api/orchestration/challenges/:id/invitations/respond`.
-4. Fighters call `/api/challenges/:id/accept` and `/api/matches/:id/join`.
-5. Engine auto-starts once both joined from distinct source IPs.
-6. Spectators watch `/match/:id`.
-
-## What remains for real three-machine integration
-
-The following work is intentionally not implemented in this repository:
-
-1. **Real group-chat trigger ingestion**
-- Wire OpenClaw chat events (keyword + mentions) to call `POST /api/orchestration/group-chat-trigger` automatically.
-
-2. **Real cross-machine role execution**
-- Run referee/fighter agents on separate OpenClaw machines and invoke accept/join/action endpoints from each role process.
-
-3. **Real secure token delivery transport**
-- Replace manual/out-of-band token sharing with authenticated OpenClaw-to-OpenClaw delivery.
-
-4. **Production network/auth hardening**
-- Add authn/authz, replay protection, trusted proxy controls, and transport-level guarantees.
-
-5. **Operational reliability beyond in-memory MVP**
-- Add persistence, recovery/restart behavior, and long-lived orchestration durability.
-
-## Scope reminder
-
-This scaffold prioritizes correctness and explicit state boundaries over speed or convenience shortcuts.
+```
+src/
+  matchEngine.ts   战斗引擎（状态机 + 物理判定）
+  server.ts        HTTP API 服务器 + 观战页
+  fighter.ts       选手脚本（stdin/stdout 管道，连接 agent LLM）
+  demoMode.ts      Demo 自动对战 bot
+public/
+  spectator.html   观战页面
+  spectator.js     前端逻辑（Canvas 动画 + SSE）
+  spectator.css    样式
+```

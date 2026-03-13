@@ -4,11 +4,10 @@
  * Usage:
  *   node --experimental-strip-types src/fighter.ts \
  *     --server http://localhost:3000 \
- *     --match-id <uuid> \
- *     --token <uuid> \
- *     [--name "MyName"]
+ *     --name "MyName"
  *
- * The script handles accept/join automatically, then enters a loop:
+ * The script auto-pairs: if a waiting room exists, it joins; otherwise it creates one.
+ * Once both fighters are in, the match starts and enters the combat loop:
  *   1. GET state -> print formatted status to stdout
  *   2. Read one line from stdin as the action
  *   3. POST action -> sleep -> repeat
@@ -16,52 +15,41 @@
  * No decision logic lives here. The agent's LLM reads stdout and writes to stdin.
  */
 
-import { createHash } from 'crypto';
 import { createInterface, Interface as ReadlineInterface } from 'readline';
 
 // ---------------------------------------------------------------------------
-// Arg parsing (zero dependencies)
+// Arg parsing
 // ---------------------------------------------------------------------------
 
 interface FighterArgs {
   server: string;
-  matchId: string;
-  token: string;
-  name: string | undefined;
+  name: string;
 }
 
 function parseArgs(): FighterArgs {
   const args = process.argv.slice(2);
   let server = '';
-  let matchId = '';
-  let token = '';
-  let name: string | undefined;
+  let name = '';
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case '--server':
         server = args[++i] ?? '';
         break;
-      case '--match-id':
-        matchId = args[++i] ?? '';
-        break;
-      case '--token':
-        token = args[++i] ?? '';
-        break;
       case '--name':
-        name = args[++i] ?? undefined;
+        name = args[++i] ?? '';
         break;
     }
   }
 
-  if (!server || !matchId || !token) {
+  if (!server || !name) {
     console.error(
-      'Usage: node --experimental-strip-types src/fighter.ts --server <url> --match-id <id> --token <token> [--name "Name"]'
+      'Usage: node --experimental-strip-types src/fighter.ts --server <url> --name "Name"'
     );
     process.exit(1);
   }
 
-  return { server: server.replace(/\/$/, ''), matchId, token, name };
+  return { server: server.replace(/\/$/, ''), name };
 }
 
 // ---------------------------------------------------------------------------
@@ -78,10 +66,10 @@ async function httpGet(url: string): Promise<unknown> {
   return body;
 }
 
-async function httpPost(url: string, payload: unknown, headers?: Record<string, string>): Promise<unknown> {
+async function httpPost(url: string, payload: unknown): Promise<{ status: number; body: unknown }> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const body = await res.json();
@@ -89,17 +77,7 @@ async function httpPost(url: string, payload: unknown, headers?: Record<string, 
     const msg = (body as Record<string, unknown>).error ?? res.statusText;
     throw new Error(`POST ${url} -> ${res.status}: ${msg}`);
   }
-  return body;
-}
-
-// ---------------------------------------------------------------------------
-// Unique IP generation from token hash
-// ---------------------------------------------------------------------------
-
-function tokenToIp(token: string): string {
-  const hash = createHash('sha256').update(token).digest();
-  // Generate a 10.x.x.x address from the first 3 bytes of the hash
-  return `10.${hash[0]}.${hash[1]}.${hash[2]}`;
+  return { status: res.status, body };
 }
 
 // ---------------------------------------------------------------------------
@@ -109,8 +87,6 @@ function tokenToIp(token: string): string {
 interface FighterPublic {
   slot: string;
   name: string;
-  accepted: boolean;
-  joined: boolean;
   hp: number;
   energy: number;
   position: number;
@@ -155,7 +131,6 @@ function formatState(state: MatchState, mySlot: string): string {
     `Distance: ${state.distance}`,
   ];
 
-  // Recent events (last 4 tick events)
   const tickEvents = state.recentEvents
     .filter((e) => e.message.startsWith('Tick '))
     .slice(-4);
@@ -235,74 +210,51 @@ function sleep(ms: number): Promise<void> {
 
 async function main(): Promise<void> {
   const opts = parseArgs();
-  const fakeIp = tokenToIp(opts.token);
 
   console.log(`[fighter] Server: ${opts.server}`);
-  console.log(`[fighter] Match:  ${opts.matchId}`);
-  console.log(`[fighter] IP:     ${fakeIp}`);
+  console.log(`[fighter] Name:   ${opts.name}`);
   console.log('');
 
-  // --- Step 1: Accept challenge ---
-  console.log('[fighter] Accepting challenge...');
-  const acceptResult = await httpPost(`${opts.server}/api/challenges/${opts.matchId}/accept`, {
-    token: opts.token,
-    fighterName: opts.name,
-  }) as MatchState;
+  // --- Step 1: Auto-pair (find-or-create) ---
+  console.log('[fighter] Joining match (auto-pair)...');
+  const { body: joinResult } = await httpPost(`${opts.server}/api/matches/join`, {
+    name: opts.name,
+  });
 
-  // Determine our slot
-  const mySlot = acceptResult.fighters.find((f) => f.name === (opts.name ?? ''))
-    ? (acceptResult.fighters.find((f) => f.name === opts.name)?.slot ?? detectSlot(acceptResult, opts.token))
-    : detectSlot(acceptResult, opts.token);
+  const result = joinResult as { matchId: string; slot: string; spectatorUrl: string };
+  const matchId = result.matchId;
+  const mySlot = result.slot;
 
-  console.log(`[fighter] Accepted as slot ${mySlot}.`);
+  console.log(`[fighter] Match:  ${matchId}`);
+  console.log(`[fighter] Slot:   ${mySlot}`);
+  console.log(`[fighter] Watch:  ${opts.server}${result.spectatorUrl}`);
+  console.log('');
 
-  // --- Step 2: Wait for both accepted ---
-  let state = acceptResult;
-  while (state.status !== 'ready_to_join' && state.status !== 'running' && state.status !== 'finished' && state.status !== 'cancelled') {
-    console.log(`[fighter] Waiting for opponent to accept... (status: ${state.status})`);
+  // --- Step 2: Wait for opponent if we created the room ---
+  let state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
+
+  while (state.status === 'waiting') {
+    console.log('[fighter] Waiting for opponent to join...');
     await sleep(1500);
-    state = (await httpGet(`${opts.server}/api/matches/${opts.matchId}/state`)) as MatchState;
+    state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
   }
 
-  if (state.status === 'cancelled' || state.status === 'finished') {
-    console.log(`[fighter] Match ended before join: ${state.summary ?? state.status}`);
-    process.exit(0);
-  }
-
-  // --- Step 3: Join match ---
-  console.log('[fighter] Joining match...');
-  state = (await httpPost(
-    `${opts.server}/api/matches/${opts.matchId}/join`,
-    { token: opts.token, fighterName: opts.name },
-    { 'X-Forwarded-For': fakeIp }
-  )) as MatchState;
-  console.log(`[fighter] Joined from IP ${fakeIp}.`);
-
-  // --- Step 4: Wait for opponent join ---
-  while (state.status !== 'running' && state.status !== 'finished' && state.status !== 'cancelled') {
-    console.log(`[fighter] Waiting for opponent to join... (status: ${state.status})`);
-    await sleep(1500);
-    state = (await httpGet(`${opts.server}/api/matches/${opts.matchId}/state`)) as MatchState;
-  }
-
-  if (state.status === 'cancelled' || state.status === 'finished') {
-    console.log(`[fighter] Match ended before combat: ${state.summary ?? state.status}`);
+  if (state.status === 'finished') {
+    console.log(`[fighter] Match ended: ${state.summary ?? state.status}`);
     process.exit(0);
   }
 
   console.log('[fighter] Match started!');
   console.log('');
 
-  // --- Step 5: Combat loop ---
+  // --- Step 3: Combat loop ---
   const reader = createLineReader();
   let stdinClosed = false;
   let lastTick = state.tick;
 
   while (state.status === 'running') {
-    // Print state
     process.stdout.write(formatState(state, mySlot) + ' ');
 
-    // Read action from stdin
     let action = 'idle';
     if (!stdinClosed) {
       const line = await reader.nextLine();
@@ -319,28 +271,23 @@ async function main(): Promise<void> {
       }
     }
 
-    // Submit action
     try {
-      await httpPost(`${opts.server}/api/matches/${opts.matchId}/action`, {
-        token: opts.token,
+      await httpPost(`${opts.server}/api/matches/${matchId}/action`, {
+        name: opts.name,
         action,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Match may have ended between state check and action submit
       if (msg.includes('not running')) {
         break;
       }
       console.error(`[fighter] Action error: ${msg}`);
     }
 
-    // Wait for next tick
     await sleep(800);
 
-    // Fetch new state
-    state = (await httpGet(`${opts.server}/api/matches/${opts.matchId}/state`)) as MatchState;
+    state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
 
-    // Detect tick skip
     if (state.tick > lastTick + 1) {
       console.log(`[fighter] Note: tick jumped from ${lastTick} to ${state.tick} (slow decision?)`);
     }
@@ -349,7 +296,7 @@ async function main(): Promise<void> {
 
   reader.close();
 
-  // --- Step 6: Print result ---
+  // --- Step 4: Print result ---
   console.log('');
   console.log('=== MATCH RESULT ===');
   console.log(`Status: ${state.status}`);
@@ -360,28 +307,6 @@ async function main(): Promise<void> {
   const opp = state.fighters.find((f) => f.slot !== mySlot)!;
   console.log(`Your HP: ${me.hp}  Opponent HP: ${opp.hp}`);
   console.log('====================');
-}
-
-/**
- * Detect our slot by checking which fighter just got accepted.
- * After accept, the fighter that was just accepted will have accepted=true.
- * If both are accepted, fall back to checking whose data was most recently updated.
- */
-function detectSlot(state: MatchState, _token: string): string {
-  // After accept, the one just accepted has accepted=true and the accept response
-  // includes our name. Since we can't see tokens in public state, use positional logic:
-  // In the accept response, the status changes tell us which slot we are.
-  // Look at recentEvents for the accept event
-  const acceptEvents = state.recentEvents.filter((e) => e.message.includes('accepted the challenge'));
-  if (acceptEvents.length > 0) {
-    const last = acceptEvents[acceptEvents.length - 1];
-    if (last.message.startsWith('A ')) return 'A';
-    if (last.message.startsWith('B ')) return 'B';
-  }
-  // Fallback: first accepted fighter
-  const accepted = state.fighters.filter((f) => f.accepted);
-  if (accepted.length === 1) return accepted[0].slot;
-  return 'A';
 }
 
 main().catch((err) => {

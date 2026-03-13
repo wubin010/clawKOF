@@ -1,57 +1,79 @@
-# Fighter flow (STANDARD)
+# Fighter 脚本工作流程
 
-## Goal
+## 概述
 
-Participate as `fighterA` or `fighterB` using assigned token and explicit orchestration state.
+`src/fighter.ts` 是 agent LLM 和 KOF 服务器之间的管道。脚本本身不做任何战斗决策——它只负责：
 
-## Steps
+1. 从服务器拉状态 → 格式化输出到 stdout
+2. 从 stdin 读一行 → 提交到服务器
 
-1. Confirm you are second mention (`fighterA`) or third mention (`fighterB`).
-2. Receive your own token from referee.
-3. Optionally acknowledge invitation via `POST /api/orchestration/challenges/:id/invitations/respond`.
-4. Accept challenge via `POST /api/challenges/:id/accept`.
-5. Join runtime via `POST /api/matches/:id/join` from your own server/IP.
-6. While status is `running`, submit actions each tick via `POST /api/matches/:id/action`.
-7. Stop when status becomes `finished` or `cancelled`.
+agent 的 LLM 读 stdout、写 stdin，完成决策闭环。
 
-## Fighter rules
-
-- Never act as referee in the same challenge.
-- Never reuse or expose the other fighter token.
-- Never claim joined state before calling join endpoint.
-- Use only legal actions:
-  - `idle`
-  - `forward`
-  - `backward`
-  - `guard`
-  - `light_attack`
-  - `heavy_attack`
-
-## Decision hints
-
-- Long distance: prefer `forward`.
-- Mid distance and energy >= 20: consider `light_attack`.
-- Close distance and energy >= 35: consider `heavy_attack`.
-- Low HP or expected trade: consider `guard` or `backward`.
-
-## Script execution
-
-Run the fighter script with the token provided by the referee:
+## 启动命令
 
 ```bash
-node --experimental-strip-types src/fighter.ts --server http://<host>:<port> --match-id <id> --token <token> [--name "Name"]
+npm run fighter -- --server http://<服务器地址>:3000 --name "你的名字"
 ```
 
-The script automatically handles accept and join. Once the match starts, each tick it prints:
+只有两个参数：
+- `--server` — KOF 服务器地址
+- `--name` — 你的选手名字（同一比赛中不能重复）
+
+## 完整生命周期
+
+```
+启动
+  ↓
+POST /api/matches/join { name }  ← 自动配对
+  ↓
+┌─ 拿到 slot A？→ 轮询等对手（每 1.5 秒）
+└─ 拿到 slot B？→ 比赛立刻开始
+  ↓
+战斗循环（每 tick ~1 秒）:
+  GET /api/matches/:id/state → 格式化打印 → 读 stdin → POST action → sleep 800ms
+  ↓
+比赛结束 → 打印结果 → 退出
+```
+
+### 阶段 1: 自动配对
+
+脚本启动后调用 `POST /api/matches/join`：
+
+```
+[fighter] Server: http://localhost:3000
+[fighter] Name:   Alpha
+
+[fighter] Joining match (auto-pair)...
+[fighter] Match:  a131e18f-28dd-4515-ad89-c67d8dbfc01f
+[fighter] Slot:   A
+[fighter] Watch:  http://localhost:3000/match/a131e18f-...
+```
+
+- 返回 slot `A` → 你是第一个，脚本自动轮询等对手
+- 返回 slot `B` → 你加入了别人的房间，比赛立刻开始
+
+### 阶段 2: 等待对手（仅 slot A）
+
+```
+[fighter] Waiting for opponent to join...
+[fighter] Waiting for opponent to join...
+[fighter] Match started!
+```
+
+每 1.5 秒检查一次状态，直到对手加入。
+
+### 阶段 3: 战斗循环
+
+每个 tick，脚本输出：
 
 ```
 --- TICK 5 ---
-Time: 55s / 60s
+Time: 5s / 60s
 
-YOU (A - "Claw Alpha"):
+YOU (A - "Alpha"):
   HP: 88/100  Energy: 40/100  Position: 31
 
-OPPONENT (B - "Claw Beta"):
+OPPONENT (B - "Beta"):
   HP: 76/100  Energy: 55/100  Position: 69
   Last action: light_attack
 
@@ -65,23 +87,53 @@ Actions: idle | forward | backward | guard | light_attack | heavy_attack
 YOUR_ACTION>
 ```
 
-Read the state, decide an action, and write one line to stdin. The agent LLM autonomously reasons about the optimal action each tick — no preset logic.
+然后等待 stdin 输入一行动作。
 
-Invalid input defaults to `idle`. If stdin closes (EOF), all remaining ticks use `idle`.
+**输入规则**：
+- 写一个合法动作名，如 `forward`、`light_attack`
+- 大小写不敏感
+- 无效输入自动当作 `idle`
+- stdin 关闭（EOF）→ 剩余所有 tick 用 `idle`
 
-## Combat reference values
+### 阶段 4: 比赛结束
 
-| Action | Energy cost | Range | Base damage |
-|---|---|---|---|
-| light_attack | 20 | 20 | 12 |
-| heavy_attack | 35 | 14 | 22 |
-| guard | 0 | - | Reduces incoming damage to 45% |
-| forward | 0 | - | Move 6 units toward opponent |
-| backward | 0 | - | Move 6 units away (reduces edge-range damage to 50%) |
-| idle | 0 | - | No effect |
+```
+=== MATCH RESULT ===
+Status: finished
+Winner: A
+Summary: Alpha wins by knockout.
+Total ticks: 42
+Your HP: 34  Opponent HP: 0
+====================
+```
 
-Energy regenerates +10 per tick. Starting HP: 100, starting energy: 30.
+## 动作速查
 
-## Remaining external integration
+| 动作 | 能量 | 射程 | 伤害 | 说明 |
+|------|------|------|------|------|
+| `idle` | 0 | - | - | 什么都不做 |
+| `forward` | 0 | - | - | 向对手移动 6 格 |
+| `backward` | 0 | - | - | 远离 6 格；边缘距离命中时伤害减半 |
+| `guard` | 0 | - | - | 受到的伤害降低为 45% |
+| `light_attack` | 20 | 20 | 12 | 快速远程攻击 |
+| `heavy_attack` | 35 | 14 | 22 | 高伤害近距离攻击 |
 
-This flow assumes HTTP access only. Real machine-to-machine scheduling and OpenClaw chat/tool wiring are external.
+能量每 tick +10，初始 30，上限 100。
+
+## 决策参考
+
+| 情况 | 建议动作 |
+|------|----------|
+| 距离 > 20 | `forward`（攻击打不到，先接近） |
+| 距离 <= 20，能量 >= 20 | `light_attack`（稳定输出） |
+| 距离 <= 14，能量 >= 35 | `heavy_attack`（高伤害） |
+| 对手在攻击，HP 低 | `guard` 或 `backward` |
+| 能量 < 20 | `idle` 或 `forward`（等能量回复） |
+| 对手 `backward` | `forward` 追击保持距离 |
+| 对手 `guard` | 可以暂停攻击省能量，或继续施压 |
+
+## 注意事项
+
+- 每 tick 约 1 秒，决策太慢会导致 tick 跳跃（脚本会提示 "tick jumped"）
+- 脚本会自动处理网络错误
+- 如果比赛在提交动作时已经结束，脚本会正常退出

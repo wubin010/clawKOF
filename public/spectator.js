@@ -12,39 +12,10 @@
     time: document.getElementById('time'),
     status: document.getElementById('status'),
     phaseLabel: document.getElementById('phase-label'),
-    acceptance: document.getElementById('acceptance'),
-    joins: document.getElementById('joins'),
-    invites: document.getElementById('invites'),
     distance: document.getElementById('distance'),
     tick: document.getElementById('tick'),
-    protocolVersion: document.getElementById('protocol-version'),
-    orchestrationSource: document.getElementById('orchestration-source'),
-    acceptDeadline: document.getElementById('accept-deadline'),
-    acceptRemaining: document.getElementById('accept-remaining'),
-    joinDeadline: document.getElementById('join-deadline'),
-    joinRemaining: document.getElementById('join-remaining'),
-    cancelReason: document.getElementById('cancel-reason'),
-    refName: document.getElementById('ref-name'),
-    refInvite: document.getElementById('ref-invite'),
-    refAccept: document.getElementById('ref-accept'),
-    refJoin: document.getElementById('ref-join'),
-    refIp: document.getElementById('ref-ip'),
-    faName: document.getElementById('fa-name'),
-    faInvite: document.getElementById('fa-invite'),
-    faAccept: document.getElementById('fa-accept'),
-    faJoin: document.getElementById('fa-join'),
-    faIp: document.getElementById('fa-ip'),
-    fbName: document.getElementById('fb-name'),
-    fbInvite: document.getElementById('fb-invite'),
-    fbAccept: document.getElementById('fb-accept'),
-    fbJoin: document.getElementById('fb-join'),
-    fbIp: document.getElementById('fb-ip'),
     aName: document.getElementById('a-name'),
     bName: document.getElementById('b-name'),
-    aAccepted: document.getElementById('a-accepted'),
-    bAccepted: document.getElementById('b-accepted'),
-    aJoined: document.getElementById('a-joined'),
-    bJoined: document.getElementById('b-joined'),
     aHp: document.getElementById('a-hp'),
     bHp: document.getElementById('b-hp'),
     aEnergy: document.getElementById('a-energy'),
@@ -130,53 +101,18 @@
 
     targetState = state;
 
-    const orchestration = state.orchestration || {};
-    const roles = orchestration.roles || {};
-    const refRole = roles.referee || {};
-    const faRole = roles.fighterA || {};
-    const fbRole = roles.fighterB || {};
-
     const a = state.fighters[0];
     const b = state.fighters[1];
 
-    els.meta.textContent = `Match ${state.id} | Referee ${state.refereeName}`;
+    els.meta.textContent = `Match ${state.id.slice(0, 8)}`;
     els.time.textContent = String(state.timeRemaining);
     els.status.textContent = state.status;
     els.phaseLabel.textContent = phaseMessage(state);
-    els.acceptance.textContent = `${state.acceptance.accepted}/${state.acceptance.total}`;
-    els.joins.textContent = `${state.joins.joined}/${state.joins.total}`;
     els.distance.textContent = state.distance.toFixed(1);
     els.tick.textContent = String(state.tick);
 
-    const invitationSummary = orchestration.invitationSummary || { accepted: 0, pending: 0, declined: 0 };
-    els.invites.textContent = `${invitationSummary.accepted} accepted / ${invitationSummary.pending} pending / ${invitationSummary.declined} declined`;
-
-    els.protocolVersion.textContent = orchestration.protocolVersion || '--';
-    els.orchestrationSource.textContent = orchestration.source || '--';
-
-    const acceptanceTimeout = orchestration.timeouts ? orchestration.timeouts.acceptance : null;
-    const joinTimeout = orchestration.timeouts ? orchestration.timeouts.join : null;
-
-    els.acceptDeadline.textContent = formatDate(acceptanceTimeout && acceptanceTimeout.deadlineAt);
-    els.acceptRemaining.textContent = formatRemaining(acceptanceTimeout && acceptanceTimeout.remainingSec);
-    els.joinDeadline.textContent = formatDate(joinTimeout && joinTimeout.deadlineAt);
-    els.joinRemaining.textContent = formatRemaining(joinTimeout && joinTimeout.remainingSec);
-
-    const cancellation = orchestration.cancellation || {};
-    els.cancelReason.textContent = cancellation.isCancelled
-      ? `${cancellation.reason || 'cancelled'}${cancellation.note ? ` (${cancellation.note})` : ''}`
-      : 'none';
-
-    fillRoleRow(refRole, els.refName, els.refInvite, els.refAccept, els.refJoin, els.refIp);
-    fillRoleRow(faRole, els.faName, els.faInvite, els.faAccept, els.faJoin, els.faIp);
-    fillRoleRow(fbRole, els.fbName, els.fbInvite, els.fbAccept, els.fbJoin, els.fbIp);
-
-    els.aName.textContent = `${a.slot}: ${a.name}`;
-    els.bName.textContent = `${b.slot}: ${b.name}`;
-    els.aAccepted.textContent = a.accepted ? 'yes' : 'no';
-    els.bAccepted.textContent = b.accepted ? 'yes' : 'no';
-    els.aJoined.textContent = a.joined ? 'yes' : 'no';
-    els.bJoined.textContent = b.joined ? 'yes' : 'no';
+    els.aName.textContent = a.name ? `${a.slot}: ${a.name}` : 'Fighter A';
+    els.bName.textContent = b.name ? `${b.slot}: ${b.name}` : 'Fighter B (waiting)';
     els.aHp.textContent = String(Math.round(a.hp));
     els.bHp.textContent = String(Math.round(b.hp));
     els.aEnergy.textContent = String(Math.round(a.energy));
@@ -191,7 +127,7 @@
 
     syncLog(state.recentEvents || []);
 
-    if (state.status === 'finished' || state.status === 'cancelled') {
+    if (state.status === 'finished') {
       els.result.classList.remove('hidden');
       els.summary.textContent = state.summary || 'Match over.';
       els.reportLink.href = `/api/matches/${state.id}/report`;
@@ -200,49 +136,14 @@
     }
   }
 
-  function fillRoleRow(role, elName, elInvite, elAccept, elJoin, elIp) {
-    elName.textContent = role.displayName || '--';
-    elInvite.textContent = role.invitationStatus || '--';
-    elAccept.textContent = role.acceptanceStatus || '--';
-    elJoin.textContent = role.joinStatus || '--';
-    elIp.textContent = role.sourceIp || '--';
-  }
-
   function phaseMessage(state) {
-    if (state.status === 'challenge_created') {
-      return 'Challenge created. Waiting for both fighters to accept tokens.';
-    }
-    if (state.status === 'awaiting_acceptance') {
-      return 'One fighter accepted. Waiting for the second acceptance.';
-    }
-    if (state.status === 'ready_to_join') {
-      return 'Both fighters accepted. Waiting for runtime joins from distinct IPs.';
+    if (state.status === 'waiting') {
+      return 'Waiting for second fighter to join...';
     }
     if (state.status === 'running') {
-      return 'Match is live.';
-    }
-    if (state.status === 'cancelled') {
-      return 'Challenge cancelled before match start.';
+      return 'Match is live!';
     }
     return 'Match finished.';
-  }
-
-  function formatDate(value) {
-    if (!value) {
-      return '--';
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return '--';
-    }
-    return date.toLocaleString();
-  }
-
-  function formatRemaining(value) {
-    if (typeof value !== 'number') {
-      return '--';
-    }
-    return `${Math.max(0, Math.round(value))}s`;
   }
 
   function syncLog(events) {
@@ -285,18 +186,20 @@
 
     drawBackground(w, h);
 
-    const isRunning = targetState.status === 'running' || targetState.status === 'finished';
-    drawFighter(0.5 + anim.aPos / 100, 0.72, '#f97316', true, a.currentAction, anim.flashA, isRunning, a.joined);
-    drawFighter(0.5 + anim.bPos / 100, 0.72, '#38bdf8', false, b.currentAction, anim.flashB, isRunning, b.joined);
+    const isActive = targetState.status === 'running' || targetState.status === 'finished';
+    const aReady = Boolean(a.name);
+    const bReady = Boolean(b.name);
+    drawFighter(0.5 + anim.aPos / 100, 0.72, '#f97316', true, a.currentAction, anim.flashA, isActive, aReady);
+    drawFighter(0.5 + anim.bPos / 100, 0.72, '#38bdf8', false, b.currentAction, anim.flashB, isActive, bReady);
 
-    if (!isRunning) {
+    if (!isActive) {
       ctx.save();
       ctx.fillStyle = 'rgba(7, 15, 30, 0.45)';
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#e2e8f0';
       ctx.font = '700 30px "Trebuchet MS", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(targetState.status.replace(/_/g, ' ').toUpperCase(), w / 2, h / 2);
+      ctx.fillText(targetState.status.toUpperCase(), w / 2, h / 2);
       ctx.restore();
     }
   }
@@ -317,30 +220,30 @@
     ctx.restore();
   }
 
-  function drawFighter(nx, ny, color, facingRight, action, flash, isRunning, isJoined) {
+  function drawFighter(nx, ny, color, facingRight, action, flash, isActive, isReady) {
     const w = canvas.width;
     const h = canvas.height;
     const x = nx * w - w / 2;
     const y = ny * h;
 
-    const bob = isRunning ? Math.sin(Date.now() / 140) * 3 : 0;
+    const bob = isActive ? Math.sin(Date.now() / 140) * 3 : 0;
     const pulse = 1 + Math.sin(Date.now() / 200 + x * 0.03) * 0.015;
 
-    const attackBoost = isRunning && action.includes('attack') ? 9 : 0;
-    const guardShift = isRunning && action === 'guard' ? -4 : 0;
+    const attackBoost = isActive && action.includes('attack') ? 9 : 0;
+    const guardShift = isActive && action === 'guard' ? -4 : 0;
 
     ctx.save();
     ctx.translate(x, y + bob);
     ctx.scale(facingRight ? pulse : -pulse, pulse);
 
-    if (flash > 0.05 && isRunning) {
+    if (flash > 0.05 && isActive) {
       ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.7, flash)})`;
       ctx.beginPath();
       ctx.arc(0, -40, 36, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    ctx.fillStyle = isJoined ? color : 'rgba(148, 163, 184, 0.7)';
+    ctx.fillStyle = isReady ? color : 'rgba(148, 163, 184, 0.7)';
     ctx.beginPath();
     ctx.ellipse(0, -38 + guardShift, 34, 28, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -350,7 +253,7 @@
     ctx.arc(12, -47, 4, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = isJoined ? color : 'rgba(148, 163, 184, 0.7)';
+    ctx.fillStyle = isReady ? color : 'rgba(148, 163, 184, 0.7)';
     ctx.beginPath();
     ctx.moveTo(24, -45);
     ctx.lineTo(48 + attackBoost, -65);

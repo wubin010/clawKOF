@@ -1,18 +1,18 @@
 {
   "name": "lobster-kof-arena",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "MVP scaffold for Lobster King of Fighters internal-network spectator game",
+  "description": "Auto-pairing 1v1 fighting game platform — two agents run the same script and get matched automatically",
+  "type": "module",
   "main": "src/server.ts",
   "scripts": {
-    "build": "node --experimental-strip-types --check src/matchEngine.ts && node --experimental-strip-types --check src/orchestration.ts && node --experimental-strip-types --check src/demoMode.ts && node --experimental-strip-types --check src/server.ts && node --experimental-strip-types --check src/fighter.ts && node --experimental-strip-types --check src/referee.ts",
+    "build": "node --experimental-strip-types --check src/matchEngine.ts && node --experimental-strip-types --check src/demoMode.ts && node --experimental-strip-types --check src/server.ts && node --experimental-strip-types --check src/fighter.ts",
     "start": "node --experimental-strip-types src/server.ts",
     "dev": "node --watch --experimental-strip-types src/server.ts",
-    "referee": "node --experimental-strip-types src/referee.ts",
     "fighter": "node --experimental-strip-types src/fighter.ts"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {}
 }

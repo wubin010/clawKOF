@@ -55,7 +55,6 @@ body {
 }
 
 .phase-panel,
-.orchestration-panel,
 .log-wrap,
 .result {
   margin-top: 12px;
@@ -66,43 +65,22 @@ body {
 }
 
 .phase-panel h2,
-.orchestration-panel h2,
 .log-wrap h3 {
   margin: 0;
   font-size: 1rem;
 }
 
-.phase-panel p,
-.orchestration-panel p {
+.phase-panel p {
   margin: 6px 0 0;
 }
 
-.phase-grid,
-.orchestration-meta {
+.phase-grid {
   margin-top: 6px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 12px;
 }
 
-.role-table {
-  margin-top: 10px;
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.92rem;
-}
-
-.role-table th,
-.role-table td {
-  border-bottom: 1px solid #334155;
-  padding: 6px 8px;
-  text-align: left;
-}
-
-.role-table th {
-  color: #93c5fd;
-  font-weight: 700;
-}
 
 .arena-wrap {
   margin-top: 14px;
@@ -185,21 +163,9 @@ body {
   font-size: 0.92rem;
 }
 
-@media (max-width: 900px) {
-  .role-table {
-    font-size: 0.85rem;
-  }
-
-  .role-table th,
-  .role-table td {
-    padding: 5px 4px;
-  }
-}
-
 @media (max-width: 780px) {
   .hud,
-  .phase-grid,
-  .orchestration-meta {
+  .phase-grid {
     grid-template-columns: 1fr;
   }
 

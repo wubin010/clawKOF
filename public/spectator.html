@@ -20,69 +20,13 @@
       </header>
 
       <section class="phase-panel">
-        <h2>Lifecycle</h2>
-        <p id="phase-label">Preparing challenge...</p>
+        <h2>Match</h2>
+        <p id="phase-label">Waiting for fighters...</p>
         <div class="phase-grid">
-          <p>Status: <strong id="status">challenge_created</strong></p>
+          <p>Status: <strong id="status">waiting</strong></p>
           <p>Tick: <strong id="tick">0</strong></p>
-          <p>Acceptances: <strong id="acceptance">0/2</strong></p>
-          <p>Runtime joins: <strong id="joins">0/2</strong></p>
-          <p>Invitations: <strong id="invites">0 accepted / 0 pending / 0 declined</strong></p>
           <p>Distance: <strong id="distance">0</strong></p>
         </div>
-      </section>
-
-      <section class="orchestration-panel">
-        <h2>STANDARD Orchestration</h2>
-        <div class="orchestration-meta">
-          <p>Protocol: <strong id="protocol-version">--</strong></p>
-          <p>Source: <strong id="orchestration-source">--</strong></p>
-          <p>Acceptance deadline: <strong id="accept-deadline">--</strong></p>
-          <p>Acceptance remaining: <strong id="accept-remaining">--</strong></p>
-          <p>Join deadline: <strong id="join-deadline">--</strong></p>
-          <p>Join remaining: <strong id="join-remaining">--</strong></p>
-        </div>
-
-        <table class="role-table">
-          <thead>
-            <tr>
-              <th>Role</th>
-              <th>Name</th>
-              <th>Invitation</th>
-              <th>Acceptance</th>
-              <th>Join</th>
-              <th>Source IP</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>referee</td>
-              <td id="ref-name">--</td>
-              <td id="ref-invite">--</td>
-              <td id="ref-accept">--</td>
-              <td id="ref-join">--</td>
-              <td id="ref-ip">--</td>
-            </tr>
-            <tr>
-              <td>fighterA</td>
-              <td id="fa-name">--</td>
-              <td id="fa-invite">--</td>
-              <td id="fa-accept">--</td>
-              <td id="fa-join">--</td>
-              <td id="fa-ip">--</td>
-            </tr>
-            <tr>
-              <td>fighterB</td>
-              <td id="fb-name">--</td>
-              <td id="fb-invite">--</td>
-              <td id="fb-accept">--</td>
-              <td id="fb-join">--</td>
-              <td id="fb-ip">--</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <p>Cancellation: <strong id="cancel-reason">none</strong></p>
       </section>
 
       <section class="arena-wrap">
@@ -92,9 +36,6 @@
       <section class="hud">
         <article class="fighter" id="fighter-a">
           <h2 id="a-name">Fighter A</h2>
-          <p class="fighter-stage">
-            Accepted: <strong id="a-accepted">no</strong> | Joined: <strong id="a-joined">no</strong>
-          </p>
           <div class="bar hp"><span id="a-hp-bar"></span></div>
           <p>HP: <strong id="a-hp">0</strong></p>
           <div class="bar energy"><span id="a-en-bar"></span></div>
@@ -104,9 +45,6 @@
 
         <article class="fighter" id="fighter-b">
           <h2 id="b-name">Fighter B</h2>
-          <p class="fighter-stage">
-            Accepted: <strong id="b-accepted">no</strong> | Joined: <strong id="b-joined">no</strong>
-          </p>
           <div class="bar hp"><span id="b-hp-bar"></span></div>
           <p>HP: <strong id="b-hp">0</strong></p>
           <div class="bar energy"><span id="b-en-bar"></span></div>
@@ -117,14 +55,14 @@
 
       <section class="status-row">
         <div id="result" class="result hidden">
-          <h3>Terminal State</h3>
+          <h3>Result</h3>
           <p id="summary"></p>
           <a id="report-link" href="#" target="_blank" rel="noreferrer">Open JSON report</a>
         </div>
       </section>
 
       <section class="log-wrap">
-        <h3>Action / Orchestration Log</h3>
+        <h3>Event Log</h3>
         <ul id="log"></ul>
       </section>
     </main>
