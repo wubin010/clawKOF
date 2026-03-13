@@ -9,7 +9,7 @@ export async function runDemoMode(baseUrl: string): Promise<DemoInfo> {
   const aResp = await fetch(`${baseUrl}/api/matches/join`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'Claw Alpha', duration: 60 }),
+    body: JSON.stringify({ name: 'Claw Alpha', duration: 120 }),
   });
   if (!aResp.ok) {
     throw new Error(`Unable to create demo match: ${aResp.status}`);
@@ -32,40 +32,60 @@ export async function runDemoMode(baseUrl: string): Promise<DemoInfo> {
   return { matchId: aResult.matchId };
 }
 
-function driveBot(baseUrl: string, matchId: string, name: string, slot: 'A' | 'B'): void {
-  const interval = setInterval(async () => {
+const MAX_CONSECUTIVE_ERRORS = 5;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function driveBot(baseUrl: string, matchId: string, name: string, slot: 'A' | 'B'): Promise<void> {
+  let errors = 0;
+
+  while (errors < MAX_CONSECUTIVE_ERRORS) {
     try {
       const stateResp = await fetch(`${baseUrl}/api/matches/${matchId}/state`);
       if (!stateResp.ok) {
-        clearInterval(interval);
-        return;
+        errors++;
+        continue;
       }
-      const state = (await stateResp.json()) as MatchPublicState;
+      let state = (await stateResp.json()) as MatchPublicState;
 
-      if (state.status !== 'running') {
-        if (state.status === 'finished') {
-          clearInterval(interval);
+      if (state.status === 'finished') return;
+      if (state.status === 'waiting') {
+        errors = 0;
+        await sleep(500);
+        continue;
+      }
+
+      // Running — submit actions until match ends
+      while (state.status === 'running' && errors < MAX_CONSECUTIVE_ERRORS) {
+        const me = state.fighters.find((fighter) => fighter.slot === slot);
+        const opponent = state.fighters.find((fighter) => fighter.slot !== slot);
+        if (!me || !opponent) break;
+
+        const action = chooseAction(me.energy, state.distance, me.hp, opponent.hp);
+
+        const actionResp = await fetch(`${baseUrl}/api/matches/${matchId}/action`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name, action }),
+        });
+
+        if (!actionResp.ok) {
+          errors++;
+          break;
         }
-        return;
+
+        // POST blocks until tick resolves — response is the new state
+        state = (await actionResp.json()) as MatchPublicState;
+        errors = 0;
       }
 
-      const me = state.fighters.find((fighter) => fighter.slot === slot);
-      const opponent = state.fighters.find((fighter) => fighter.slot !== slot);
-      if (!me || !opponent) {
-        return;
-      }
-
-      const action = chooseAction(me.energy, state.distance, me.hp, opponent.hp);
-
-      await fetch(`${baseUrl}/api/matches/${matchId}/action`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, action }),
-      });
+      if (state.status === 'finished') return;
     } catch {
-      clearInterval(interval);
+      errors++;
     }
-  }, 850);
+  }
 }
 
 function chooseAction(energy: number, distance: number, hp: number, enemyHp: number): FighterAction {

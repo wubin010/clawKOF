@@ -9,15 +9,21 @@ const engine = new MatchEngine();
 
 const PORT = Number(process.env.PORT ?? 3000);
 const ENABLE_DEMO = process.env.DEMO_MODE === '1';
-const TICK_INTERVAL_MS = 1000;
-
-const publicDir = path.join(process.cwd(), 'public');
+const publicDir = path.resolve(process.cwd(), 'public');
 
 setInterval(() => {
-  engine.tickAll();
-}, TICK_INTERVAL_MS);
+  engine.housekeep();
+}, 5000);
 
 const server = createServer(async (req, res) => {
+  setCorsHeaders(res);
+
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+
   try {
     await handleRequest(req, res);
   } catch (error) {
@@ -41,10 +47,22 @@ server.listen(PORT, async () => {
   }
 });
 
+function setCorsHeaders(res: ServerResponse): void {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const pathname = url.pathname;
+
+  // GET /health
+  if (method === 'GET' && pathname === '/health') {
+    sendJson(res, 200, { ok: true });
+    return;
+  }
 
   if (method === 'GET' && pathname === '/') {
     const latest = engine.getLatestMatchId();
@@ -81,6 +99,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   const matchView = pathname.match(/^\/match\/([^/]+)$/);
   if (method === 'GET' && matchView) {
     await serveFile(path.join(publicDir, 'spectator.html'), 'text/html; charset=utf-8', res);
+    return;
+  }
+
+  // GET /api/matches — list all matches
+  if (method === 'GET' && pathname === '/api/matches') {
+    sendJson(res, 200, engine.listMatches());
     return;
   }
 
@@ -139,7 +163,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
-    const state = engine.submitAction(matchId, name, action);
+    const state = await engine.submitAction(matchId, name, action);
     sendJson(res, 200, state);
     return;
   }
@@ -180,13 +204,21 @@ function serveEvents(matchId: string, req: IncomingMessage, res: ServerResponse)
 
   sendSseEvent(res, 'hello', { ok: true, matchId });
 
+  // Push current state immediately so reconnecting clients aren't blank
+  try {
+    const currentState = engine.getState(matchId);
+    sendSseEvent(res, 'state', { kind: 'state', state: currentState });
+  } catch {
+    // match may have been GC'd between check and here
+  }
+
   const unsubscribe = engine.subscribe(matchId, (update) => {
     sendSseEvent(res, update.kind, update);
   });
 
   const heartbeat = setInterval(() => {
     res.write(': ping\n\n');
-  }, 15000);
+  }, 5000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
@@ -202,8 +234,13 @@ function sendSseEvent(res: ServerResponse, event: string, data: unknown): void {
 
 async function serveStatic(pathname: string, res: ServerResponse): Promise<void> {
   const relPath = pathname.replace('/static/', '');
-  const cleanPath = relPath.replace(/\.\./g, '');
-  const target = path.join(publicDir, cleanPath);
+  const target = path.resolve(publicDir, relPath);
+
+  // Path traversal protection
+  if (!target.startsWith(publicDir + path.sep) && target !== publicDir) {
+    sendJson(res, 403, { error: 'Forbidden' });
+    return;
+  }
 
   const ext = path.extname(target);
   const contentType =

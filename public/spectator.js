@@ -61,6 +61,8 @@
     applyState(state);
   }
 
+  var reconnectDelay = 2000;
+
   function connectEvents() {
     const es = new EventSource(`/api/matches/${matchId}/events`);
     const consume = (event) => {
@@ -78,9 +80,15 @@
     es.addEventListener('event', consume);
     es.addEventListener('end', consume);
 
+    es.onopen = () => {
+      reconnectDelay = 2000;
+    };
+
     es.onerror = async () => {
       es.close();
-      setTimeout(connectEvents, 2000);
+      var delay = reconnectDelay;
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+      setTimeout(connectEvents, delay);
       try {
         await refreshState();
       } catch {
@@ -90,6 +98,10 @@
   }
 
   function applyState(state) {
+    if (!state || !state.fighters) {
+      return;
+    }
+
     if (targetState && targetState.fighters && state.fighters) {
       if (state.fighters[0].hp < targetState.fighters[0].hp) {
         anim.flashA = 1;
@@ -101,18 +113,18 @@
 
     targetState = state;
 
-    const a = state.fighters[0];
-    const b = state.fighters[1];
+    var a = state.fighters[0];
+    var b = state.fighters[1];
 
-    els.meta.textContent = `Match ${state.id.slice(0, 8)}`;
+    els.meta.textContent = 'Match ' + state.id.slice(0, 8);
     els.time.textContent = String(state.timeRemaining);
     els.status.textContent = state.status;
     els.phaseLabel.textContent = phaseMessage(state);
     els.distance.textContent = state.distance.toFixed(1);
     els.tick.textContent = String(state.tick);
 
-    els.aName.textContent = a.name ? `${a.slot}: ${a.name}` : 'Fighter A';
-    els.bName.textContent = b.name ? `${b.slot}: ${b.name}` : 'Fighter B (waiting)';
+    els.aName.textContent = a.name ? a.slot + ': ' + a.name : 'Fighter A';
+    els.bName.textContent = b.name ? b.slot + ': ' + b.name : 'Fighter B (waiting)';
     els.aHp.textContent = String(Math.round(a.hp));
     els.bHp.textContent = String(Math.round(b.hp));
     els.aEnergy.textContent = String(Math.round(a.energy));
@@ -120,17 +132,17 @@
     els.aAction.textContent = a.currentAction;
     els.bAction.textContent = b.currentAction;
 
-    els.aHpBar.style.width = `${Math.max(0, a.hp)}%`;
-    els.bHpBar.style.width = `${Math.max(0, b.hp)}%`;
-    els.aEnBar.style.width = `${Math.max(0, a.energy)}%`;
-    els.bEnBar.style.width = `${Math.max(0, b.energy)}%`;
+    els.aHpBar.style.width = Math.max(0, a.hp) + '%';
+    els.bHpBar.style.width = Math.max(0, b.hp) + '%';
+    els.aEnBar.style.width = Math.max(0, a.energy) + '%';
+    els.bEnBar.style.width = Math.max(0, b.energy) + '%';
 
     syncLog(state.recentEvents || []);
 
     if (state.status === 'finished') {
       els.result.classList.remove('hidden');
       els.summary.textContent = state.summary || 'Match over.';
-      els.reportLink.href = `/api/matches/${state.id}/report`;
+      els.reportLink.href = '/api/matches/' + state.id + '/report';
     } else {
       els.result.classList.add('hidden');
     }
@@ -147,22 +159,22 @@
   }
 
   function syncLog(events) {
-    const items = events.slice(-16).map((event) => {
-      const li = document.createElement('li');
-      li.textContent = `[${event.tick}] ${event.type}: ${event.message}`;
+    var items = events.slice(-16).map(function (event) {
+      var li = document.createElement('li');
+      li.textContent = '[' + event.tick + '] ' + event.type + ': ' + event.message;
       return li;
     });
 
     els.log.innerHTML = '';
-    for (const item of items) {
-      els.log.appendChild(item);
+    for (var i = 0; i < items.length; i++) {
+      els.log.appendChild(items[i]);
     }
   }
 
   function loop() {
-    if (targetState) {
-      const a = targetState.fighters[0];
-      const b = targetState.fighters[1];
+    if (targetState && targetState.fighters) {
+      var a = targetState.fighters[0];
+      var b = targetState.fighters[1];
 
       anim.aPos += (a.position - anim.aPos) * 0.13;
       anim.bPos += (b.position - anim.bPos) * 0.13;
@@ -179,16 +191,16 @@
   }
 
   function renderArena(a, b) {
-    const w = canvas.width;
-    const h = canvas.height;
+    var w = canvas.width;
+    var h = canvas.height;
 
     ctx.clearRect(0, 0, w, h);
 
     drawBackground(w, h);
 
-    const isActive = targetState.status === 'running' || targetState.status === 'finished';
-    const aReady = Boolean(a.name);
-    const bReady = Boolean(b.name);
+    var isActive = targetState && (targetState.status === 'running' || targetState.status === 'finished');
+    var aReady = Boolean(a.name);
+    var bReady = Boolean(b.name);
     drawFighter(0.5 + anim.aPos / 100, 0.72, '#f97316', true, a.currentAction, anim.flashA, isActive, aReady);
     drawFighter(0.5 + anim.bPos / 100, 0.72, '#38bdf8', false, b.currentAction, anim.flashB, isActive, bReady);
 
@@ -199,7 +211,7 @@
       ctx.fillStyle = '#e2e8f0';
       ctx.font = '700 30px "Trebuchet MS", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(targetState.status.toUpperCase(), w / 2, h / 2);
+      ctx.fillText(targetState ? targetState.status.toUpperCase() : 'LOADING', w / 2, h / 2);
       ctx.restore();
     }
   }
@@ -209,8 +221,8 @@
     ctx.fillStyle = 'rgba(255,255,255,0.04)';
     ctx.fillRect(0, h * 0.78, w, h * 0.22);
 
-    for (let i = 0; i < 5; i += 1) {
-      const x = (i + 0.5) * (w / 5);
+    for (var i = 0; i < 5; i += 1) {
+      var x = (i + 0.5) * (w / 5);
       ctx.strokeStyle = 'rgba(255,255,255,0.09)';
       ctx.beginPath();
       ctx.moveTo(x, h * 0.76);
@@ -221,23 +233,23 @@
   }
 
   function drawFighter(nx, ny, color, facingRight, action, flash, isActive, isReady) {
-    const w = canvas.width;
-    const h = canvas.height;
-    const x = nx * w - w / 2;
-    const y = ny * h;
+    var w = canvas.width;
+    var h = canvas.height;
+    var x = nx * w - w / 2;
+    var y = ny * h;
 
-    const bob = isActive ? Math.sin(Date.now() / 140) * 3 : 0;
-    const pulse = 1 + Math.sin(Date.now() / 200 + x * 0.03) * 0.015;
+    var bob = isActive ? Math.sin(Date.now() / 140) * 3 : 0;
+    var pulse = 1 + Math.sin(Date.now() / 200 + x * 0.03) * 0.015;
 
-    const attackBoost = isActive && action.includes('attack') ? 9 : 0;
-    const guardShift = isActive && action === 'guard' ? -4 : 0;
+    var attackBoost = isActive && action.includes('attack') ? 9 : 0;
+    var guardShift = isActive && action === 'guard' ? -4 : 0;
 
     ctx.save();
     ctx.translate(x, y + bob);
     ctx.scale(facingRight ? pulse : -pulse, pulse);
 
     if (flash > 0.05 && isActive) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.7, flash)})`;
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + Math.min(0.7, flash) + ')';
       ctx.beginPath();
       ctx.arc(0, -40, 36, 0, Math.PI * 2);
       ctx.fill();

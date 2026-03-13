@@ -40,6 +40,8 @@ export interface MatchEvent {
   payload?: Record<string, unknown>;
 }
 
+const TICK_DEADLINE_MS = Number(process.env.TICK_DEADLINE_MS) || 5000;
+
 interface MatchInternalState {
   id: string;
   createdAt: string;
@@ -48,12 +50,15 @@ interface MatchInternalState {
   timeRemaining: number;
   tick: number;
   fighters: [FighterInternalState, FighterInternalState];
-  pendingActions: Map<string, FighterAction>;
+  pendingActions: Map<FighterSlot, FighterAction>;
   events: MatchEvent[];
   winner: Winner;
   summary: string | null;
   endedAt: string | null;
   nextEventId: number;
+  waitingDeadline: number;
+  tickTimer: ReturnType<typeof setTimeout> | null;
+  tickResolvers: Array<(state: MatchPublicState) => void>;
 }
 
 export interface FighterPublicState {
@@ -140,6 +145,7 @@ export class MatchEngine {
   }
 
   createMatch(opts: { name: string; durationSec?: number }): CreateMatchResult {
+    validateFighterName(opts.name);
     const id = randomUUID();
     const now = new Date().toISOString();
     const duration = sanitizeDuration(opts.durationSec);
@@ -169,12 +175,15 @@ export class MatchEngine {
           currentAction: 'idle',
         },
       ],
-      pendingActions: new Map<string, FighterAction>(),
+      pendingActions: new Map<FighterSlot, FighterAction>(),
       events: [],
       winner: null,
       summary: null,
       endedAt: null,
       nextEventId: 1,
+      waitingDeadline: Date.now() + 300_000,
+      tickTimer: null,
+      tickResolvers: [],
     };
 
     this.addEvent(match, 'system', `Match created. ${opts.name} joined as A. Waiting for opponent.`);
@@ -185,6 +194,7 @@ export class MatchEngine {
   }
 
   joinMatch(matchId: string, name: string): JoinMatchResult {
+    validateFighterName(name);
     const match = this.mustMatch(matchId);
 
     if (match.status === 'running') {
@@ -234,7 +244,7 @@ export class MatchEngine {
     };
   }
 
-  submitAction(matchId: string, name: string, action: FighterAction): MatchPublicState {
+  submitAction(matchId: string, name: string, action: FighterAction): Promise<MatchPublicState> {
     const match = this.mustMatch(matchId);
     if (match.status !== 'running') {
       throw new Error('Match is not running.');
@@ -248,7 +258,7 @@ export class MatchEngine {
       throw new Error(`Invalid action: ${action}`);
     }
 
-    match.pendingActions.set(name, action);
+    match.pendingActions.set(fighter.slot, action);
     this.addEvent(match, 'action', `${fighter.slot} submitted action: ${action}.`, {
       slot: fighter.slot,
       action,
@@ -256,13 +266,44 @@ export class MatchEngine {
 
     const state = this.toPublicState(match);
     this.emit(match.id, { kind: 'event', state, event: match.events.at(-1) });
-    return state;
+
+    if (match.pendingActions.size === 2) {
+      // Both submitted — resolve tick immediately
+      if (match.tickTimer) {
+        clearTimeout(match.tickTimer);
+        match.tickTimer = null;
+      }
+      this.resolveTick(match);
+      return Promise.resolve(this.toPublicState(match));
+    }
+
+    // First submission — start deadline timer
+    if (!match.tickTimer) {
+      match.tickTimer = setTimeout(() => {
+        match.tickTimer = null;
+        if (match.status === 'running') {
+          this.resolveTick(match);
+        }
+      }, TICK_DEADLINE_MS);
+    }
+
+    return new Promise((resolve) => {
+      match.tickResolvers.push(resolve);
+    });
   }
 
-  tickAll(): void {
-    for (const match of this.matches.values()) {
-      if (match.status === 'running') {
-        this.resolveTick(match);
+  housekeep(): void {
+    const now = Date.now();
+    for (const [id, match] of this.matches) {
+      if (match.status === 'waiting' && now > match.waitingDeadline) {
+        this.finishMatch(match, null, 'No opponent joined.');
+        this.emit(id, { kind: 'end', state: this.toPublicState(match) });
+      } else if (match.status === 'finished' && match.endedAt) {
+        const endedMs = new Date(match.endedAt).getTime();
+        if (now - endedMs > 600_000) {
+          this.listeners.delete(id);
+          this.matches.delete(id);
+        }
       }
     }
   }
@@ -290,7 +331,11 @@ export class MatchEngine {
       return;
     }
     for (const cb of set) {
-      cb(update);
+      try {
+        cb(update);
+      } catch {
+        // subscriber error must not break other subscribers
+      }
     }
   }
 
@@ -307,8 +352,8 @@ export class MatchEngine {
     match.timeRemaining = Math.max(0, match.timeRemaining - 1);
 
     const [fighterA, fighterB] = match.fighters;
-    const actionA = match.pendingActions.get(fighterA.name) ?? 'idle';
-    const actionB = match.pendingActions.get(fighterB.name) ?? 'idle';
+    const actionA = match.pendingActions.get('A') ?? 'idle';
+    const actionB = match.pendingActions.get('B') ?? 'idle';
     match.pendingActions.clear();
 
     fighterA.currentAction = actionA;
@@ -361,12 +406,18 @@ export class MatchEngine {
       }
     }
 
+    const pubState = this.toPublicState(match);
     const update: EngineUpdate = {
       kind: match.status === 'finished' ? 'end' : 'state',
-      state: this.toPublicState(match),
+      state: pubState,
       event: match.events.at(-1),
     };
     this.emit(match.id, update);
+
+    // Notify all waiters (from submitAction promises)
+    for (const resolve of match.tickResolvers) resolve(pubState);
+    match.tickResolvers = [];
+    match.tickTimer = null;
   }
 
   private applyMovement(fighter: FighterInternalState, action: FighterAction): void {
@@ -517,11 +568,19 @@ function clamp(value: number, min: number, max: number): number {
 
 function sanitizeDuration(value: number | undefined): number {
   if (!Number.isFinite(value) || value === undefined || value <= 0) {
-    return 60;
+    return 120;
   }
   return Math.min(300, Math.floor(value));
 }
 
 export function isValidAction(action: string): action is FighterAction {
   return VALID_ACTIONS.includes(action as FighterAction);
+}
+
+const FIGHTER_NAME_RE = /^[\w\u4e00-\u9fff\- ]{1,32}$/;
+
+function validateFighterName(name: string): void {
+  if (!FIGHTER_NAME_RE.test(name)) {
+    throw new Error('Invalid fighter name. 1-32 characters, letters/digits/Chinese/underscore/hyphen/space.');
+  }
 }

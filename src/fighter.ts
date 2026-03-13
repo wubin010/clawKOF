@@ -8,9 +8,9 @@
  *
  * The script auto-pairs: if a waiting room exists, it joins; otherwise it creates one.
  * Once both fighters are in, the match starts and enters the combat loop:
- *   1. GET state -> print formatted status to stdout
+ *   1. Print formatted status to stdout
  *   2. Read one line from stdin as the action
- *   3. POST action -> sleep -> repeat
+ *   3. POST action (blocks until tick resolves) -> use response as new state -> repeat
  *
  * No decision logic lives here. The agent's LLM reads stdout and writes to stdin.
  */
@@ -31,7 +31,7 @@ function loadEnv(): void {
       const eq = trimmed.indexOf('=');
       if (eq === -1) continue;
       const key = trimmed.slice(0, eq).trim();
-      const value = trimmed.slice(eq + 1).trim();
+      const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
       if (!process.env[key]) {
         process.env[key] = value;
       }
@@ -69,9 +69,9 @@ function parseArgs(): FighterArgs {
   }
 
   if (!server || !name) {
-    console.error(
+    process.stderr.write(
       'Usage: npm run fighter -- --name "Name" [--server <url>]\n' +
-      'Or set KOF_SERVER in .env file and just pass --name.'
+      'Or set KOF_SERVER in .env file and just pass --name.\n'
     );
     process.exit(1);
   }
@@ -83,28 +83,68 @@ function parseArgs(): FighterArgs {
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
+const MAX_RETRIES = 3;
+
 async function httpGet(url: string): Promise<unknown> {
-  const res = await fetch(url);
-  const body = await res.json();
-  if (!res.ok) {
-    const msg = (body as Record<string, unknown>).error ?? res.statusText;
-    throw new Error(`GET ${url} -> ${res.status}: ${msg}`);
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url);
+      const body = await res.json();
+      if (!res.ok) {
+        const msg = (body as Record<string, unknown>).error ?? res.statusText;
+        if (res.status >= 400 && res.status < 500) {
+          throw new Error(`GET ${url} -> ${res.status}: ${msg}`);
+        }
+        throw new Error(`GET ${url} -> ${res.status}: ${msg}`);
+      }
+      return body;
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      // 4xx errors: don't retry
+      if (msg.includes('-> 4')) {
+        throw err;
+      }
+      if (attempt < MAX_RETRIES) {
+        await sleep(500 * (attempt + 1));
+      }
+    }
   }
-  return body;
+  throw lastError;
 }
 
 async function httpPost(url: string, payload: unknown): Promise<{ status: number; body: unknown }> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const body = await res.json();
-  if (!res.ok) {
-    const msg = (body as Record<string, unknown>).error ?? res.statusText;
-    throw new Error(`POST ${url} -> ${res.status}: ${msg}`);
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        const msg = (body as Record<string, unknown>).error ?? res.statusText;
+        if (res.status >= 400 && res.status < 500) {
+          throw new Error(`POST ${url} -> ${res.status}: ${msg}`);
+        }
+        throw new Error(`POST ${url} -> ${res.status}: ${msg}`);
+      }
+      return { status: res.status, body };
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      // 4xx errors: don't retry
+      if (msg.includes('-> 4')) {
+        throw err;
+      }
+      if (attempt < MAX_RETRIES) {
+        await sleep(500 * (attempt + 1));
+      }
+    }
   }
-  return { status: res.status, body };
+  throw lastError;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +179,7 @@ interface MatchState {
 
 const VALID_ACTIONS = ['idle', 'forward', 'backward', 'guard', 'light_attack', 'heavy_attack'];
 
-function formatState(state: MatchState, mySlot: string): string {
+function formatState(state: MatchState, mySlot: string, myLastAction: string): string {
   const me = state.fighters.find((f) => f.slot === mySlot)!;
   const opp = state.fighters.find((f) => f.slot !== mySlot)!;
 
@@ -150,6 +190,7 @@ function formatState(state: MatchState, mySlot: string): string {
     '',
     `YOU (${me.slot} - "${me.name}"):`,
     `  HP: ${me.hp}/100  Energy: ${me.energy}/100  Position: ${me.position}`,
+    `  Your last action: ${myLastAction}`,
     '',
     `OPPONENT (${opp.slot} - "${opp.name}"):`,
     `  HP: ${opp.hp}/100  Energy: ${opp.energy}/100  Position: ${opp.position}`,
@@ -179,6 +220,8 @@ function formatState(state: MatchState, mySlot: string): string {
 // ---------------------------------------------------------------------------
 // Readline helper
 // ---------------------------------------------------------------------------
+
+const READLINE_TIMEOUT_MS = 10_000;
 
 function createLineReader(): { nextLine: () => Promise<string | null>; close: () => void } {
   const rl: ReadlineInterface = createInterface({ input: process.stdin, terminal: false });
@@ -214,13 +257,33 @@ function createLineReader(): { nextLine: () => Promise<string | null>; close: ()
         return Promise.resolve(null);
       }
       return new Promise((resolve) => {
-        waiting = resolve;
+        const timer = setTimeout(() => {
+          if (waiting === wrappedResolve) {
+            waiting = null;
+            resolve('idle');
+          }
+        }, READLINE_TIMEOUT_MS);
+
+        function wrappedResolve(line: string | null): void {
+          clearTimeout(timer);
+          resolve(line);
+        }
+
+        waiting = wrappedResolve;
       });
     },
     close() {
       rl.close();
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Logging helper — all [fighter] logs go to stderr
+// ---------------------------------------------------------------------------
+
+function log(msg: string): void {
+  process.stderr.write(`[fighter] ${msg}\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -238,12 +301,12 @@ function sleep(ms: number): Promise<void> {
 async function main(): Promise<void> {
   const opts = parseArgs();
 
-  console.log(`[fighter] Server: ${opts.server}`);
-  console.log(`[fighter] Name:   ${opts.name}`);
-  console.log('');
+  log(`Server: ${opts.server}`);
+  log(`Name:   ${opts.name}`);
+  log('');
 
   // --- Step 1: Auto-pair (find-or-create) ---
-  console.log('[fighter] Joining match (auto-pair)...');
+  log('Joining match (auto-pair)...');
   const { body: joinResult } = await httpPost(`${opts.server}/api/matches/join`, {
     name: opts.name,
   });
@@ -252,91 +315,89 @@ async function main(): Promise<void> {
   const matchId = result.matchId;
   const mySlot = result.slot;
 
-  console.log(`[fighter] Match:  ${matchId}`);
-  console.log(`[fighter] Slot:   ${mySlot}`);
-  console.log(`[fighter] Watch:  ${opts.server}${result.spectatorUrl}`);
-  console.log('');
+  log(`Match:  ${matchId}`);
+  log(`Slot:   ${mySlot}`);
+  log(`Watch:  ${opts.server}${result.spectatorUrl}`);
+  log('');
 
   // --- Step 2: Wait for opponent if we created the room ---
   let state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
 
   while (state.status === 'waiting') {
-    console.log('[fighter] Waiting for opponent to join...');
+    log('Waiting for opponent to join...');
     await sleep(1500);
     state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
   }
 
   if (state.status === 'finished') {
-    console.log(`[fighter] Match ended: ${state.summary ?? state.status}`);
+    log(`Match ended: ${state.summary ?? state.status}`);
     process.exit(0);
   }
 
-  console.log('[fighter] Match started!');
-  console.log('');
+  log('Match started!');
+  log('');
 
   // --- Step 3: Combat loop ---
+  // POST /action blocks until tick resolves, so its response IS the new state.
+  // No sleep, no extra GET needed.
   const reader = createLineReader();
   let stdinClosed = false;
-  let lastTick = state.tick;
+  let myLastAction = 'idle';
 
   while (state.status === 'running') {
-    process.stdout.write(formatState(state, mySlot) + ' ');
+    process.stdout.write(formatState(state, mySlot, myLastAction) + ' ');
 
     let action = 'idle';
     if (!stdinClosed) {
       const line = await reader.nextLine();
       if (line === null) {
         stdinClosed = true;
-        console.log('\n[fighter] stdin closed, defaulting to idle for remaining ticks.');
+        log('stdin closed, defaulting to idle for remaining ticks.');
       } else {
         const parsed = line.trim().toLowerCase();
         if (parsed && VALID_ACTIONS.includes(parsed)) {
           action = parsed;
         } else if (parsed) {
-          console.log(`[fighter] Invalid action "${parsed}", using idle.`);
+          log(`Invalid action "${parsed}", using idle.`);
         }
       }
     }
 
+    myLastAction = action;
+
     try {
-      await httpPost(`${opts.server}/api/matches/${matchId}/action`, {
+      const { body } = await httpPost(`${opts.server}/api/matches/${matchId}/action`, {
         name: opts.name,
         action,
       });
+      state = body as MatchState;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('not running')) {
         break;
       }
-      console.error(`[fighter] Action error: ${msg}`);
+      log(`Action error: ${msg}`);
+      // On error, fetch state to stay in sync
+      state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
     }
-
-    await sleep(800);
-
-    state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
-
-    if (state.tick > lastTick + 1) {
-      console.log(`[fighter] Note: tick jumped from ${lastTick} to ${state.tick} (slow decision?)`);
-    }
-    lastTick = state.tick;
   }
 
   reader.close();
 
   // --- Step 4: Print result ---
-  console.log('');
-  console.log('=== MATCH RESULT ===');
-  console.log(`Status: ${state.status}`);
-  console.log(`Winner: ${state.winner ?? 'none'}`);
-  console.log(`Summary: ${state.summary ?? 'N/A'}`);
-  console.log(`Total ticks: ${state.tick}`);
+  log('');
+  log('=== MATCH RESULT ===');
+  log(`Status: ${state.status}`);
+  log(`Winner: ${state.winner ?? 'none'}`);
+  log(`Summary: ${state.summary ?? 'N/A'}`);
+  log(`Total ticks: ${state.tick}`);
   const me = state.fighters.find((f) => f.slot === mySlot)!;
   const opp = state.fighters.find((f) => f.slot !== mySlot)!;
-  console.log(`Your HP: ${me.hp}  Opponent HP: ${opp.hp}`);
-  console.log('====================');
+  log(`Your HP: ${me.hp}  Opponent HP: ${opp.hp}`);
+  log('====================');
 }
 
 main().catch((err) => {
-  console.error(`[fighter] Fatal: ${err instanceof Error ? err.message : err}`);
+  process.stderr.write(`[fighter] Fatal: ${err instanceof Error ? err.message : err}\n`);
   process.exit(1);
 });
