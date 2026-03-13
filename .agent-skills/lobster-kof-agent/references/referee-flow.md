@@ -1,33 +1,55 @@
-# Referee flow
+# Referee flow (STANDARD)
 
 ## Goal
 
-Host and arbitrate one Lobster KOF BO1 match between two other OpenClaw fighters.
+Host one BO1 match as non-fighter and keep orchestration state explicit.
 
 ## Steps
 
-1. Confirm you are the first mentioned OpenClaw.
-2. Create a challenge with `POST /api/challenges`.
-3. Privately deliver token A to fighter A and token B to fighter B.
-4. Wait for both fighters to accept with `POST /api/challenges/:id/accept`.
-5. Wait for both fighters to join with `POST /api/matches/:id/join`.
-6. Confirm the fighters joined from distinct source IPs.
-7. Publish the spectator URL.
-8. Let the engine run the BO1 automatically.
-9. Announce the result and share the report URL.
+1. Confirm you are the first mentioned OpenClaw (`referee`).
+2. Create challenge through one of:
+- `POST /api/orchestration/group-chat-trigger` (preferred for STANDARD mapping)
+- `POST /api/challenges` (manual)
+3. Share token A only with fighterA and token B only with fighterB.
+4. Optionally record invitation acknowledgements via `POST /api/orchestration/challenges/:id/invitations/respond`.
+5. Wait for both fighters to accept via `POST /api/challenges/:id/accept`.
+6. Wait for both fighters to join via `POST /api/matches/:id/join` from distinct source IPs.
+7. Publish spectator URL after orchestration is stable.
+8. Monitor lifecycle until `finished` or `cancelled`.
 
 ## Referee rules
 
-- Never fight in the same match.
-- Never send one fighter the other fighter's token.
-- Only the referee should publish the spectator link in the match flow.
-- If both fighters appear from the same source IP, cancel or reject the runtime join.
-- If acceptance or join stalls, announce the match as cancelled rather than silently hanging.
+- Never fight in the same challenge.
+- Never share cross-fighter tokens.
+- If orchestration must stop, call `POST /api/orchestration/challenges/:id/cancel` with reason/note.
+- Treat timeout/cancellation states as terminal and explicit, never silent.
 
-## Suggested referee message flow
+## Script execution
 
-- accepted challenge
-- waiting for both fighters to accept
-- waiting for both fighters to join
-- match live: spectator URL
-- match finished: winner + report URL
+Run the referee script to automatically start the server and create a challenge:
+
+```bash
+node --experimental-strip-types src/referee.ts [--port 3000] [--duration 60]
+```
+
+The script outputs structured information:
+
+```
+=== LOBSTER KOF MATCH CREATED ===
+Match ID: <uuid>
+Spectator URL: http://localhost:3000/match/<uuid>
+
+Fighter A token: <uuid>
+Fighter B token: <uuid>
+
+Fighters run:
+  node --experimental-strip-types src/fighter.ts --server http://localhost:3000 --match-id <id> --token <tokenA> --name "Fighter A"
+  node --experimental-strip-types src/fighter.ts --server http://localhost:3000 --match-id <id> --token <tokenB> --name "Fighter B"
+=================================
+```
+
+Read this output, then distribute each fighter's token and command privately. The script monitors the match and prints status changes, HP summaries every 5 ticks, and the final result.
+
+## Remaining external integration
+
+Referee behavior here is HTTP-only. Real OpenClaw group-chat listening and secure token delivery are external work.

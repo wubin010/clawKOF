@@ -1,69 +1,158 @@
-# Lobster KOF Protocol Mapping (MVP)
+# Lobster KOF Protocol Mapping (STANDARD Scaffold)
 
-This document maps the eventual group-chat orchestration into the current HTTP scaffold.
+This document defines the STANDARD protocol currently implemented in this repo, and the explicit boundaries to future real OpenClaw integration.
 
-## Group Chat Role Assignment
+## 1. Three-role model
 
-When a user mentions three OpenClaw agents for Lobster KOF:
+Exactly three roles are modeled per challenge:
 
-- First mentioned OpenClaw: referee/host
-- Second mentioned OpenClaw: fighter A
-- Third mentioned OpenClaw: fighter B
+- `referee`
+- `fighterA`
+- `fighterB`
 
-Protocol constraints:
+Group-chat mention order mapping:
 
-- Referee is not a fighter.
-- Referee hosts HTTP server and spectator page.
+- first mention -> `referee`
+- second mention -> `fighterA`
+- third mention -> `fighterB`
+
+Constraints:
+
+- Referee never fights.
+- Fighters must join from distinct source IPs.
 - Match format is BO1.
 
-## Orchestration to HTTP Flow
+## 2. Lifecycle and terminal states
 
-1. Referee creates challenge:
-- HTTP: `POST /api/challenges`
-- Result returns `challengeId`, `matchId`, and two fighter tokens.
-- MVP note: `challengeId == matchId` by design for compactness.
-
-2. Referee shares fighter tokens out-of-band:
-- No in-band token exchange endpoint is provided.
-- Each fighter receives only their own token.
-
-3. Fighters accept challenge explicitly:
-- HTTP: `POST /api/challenges/:id/accept`
-- Body: `{ "token": "...", "fighterName": "optional" }`
-- Lifecycle progression:
-  - `challenge_created` -> `awaiting_acceptance` (first acceptance)
-  - `awaiting_acceptance` -> `ready_to_join` (second acceptance)
-
-4. Fighters join runtime from distinct source IPs:
-- HTTP: `POST /api/matches/:id/join`
-- Body: `{ "token": "...", "fighterName": "optional" }`
-- Source IP inferred from first `x-forwarded-for` or socket address.
-- Referee server rejects join if both fighters appear from same source IP.
-
-5. Match auto-start:
-- Lifecycle progression:
-  - `ready_to_join` -> `running` once both accepted fighters have joined from distinct IPs.
-
-6. Runtime actions and spectator:
-- Fighters submit actions to `POST /api/matches/:id/action`.
-- Spectators read:
-  - `GET /match/:id`
-  - `GET /api/matches/:id/state`
-  - `GET /api/matches/:id/events`
-  - `GET /api/matches/:id/report`
-
-7. Referee posts spectator URL only:
-- Referee shares `/match/:id` with observers.
-- Fighters do not need spectator URL to participate.
-
-## Lifecycle Enum
-
-Server state lifecycle for a single BO1 match:
+Implemented challenge/match status enum:
 
 - `challenge_created`
 - `awaiting_acceptance`
 - `ready_to_join`
 - `running`
 - `finished`
+- `cancelled`
 
-The spectator page displays pre-fight statuses so viewers can see acceptance/join progress before combat begins.
+Pre-match cancellation reasons tracked in state:
+
+- `referee_cancelled`
+- `fighter_declined_invitation`
+- `acceptance_timeout`
+- `join_timeout`
+- `protocol_violation`
+
+## 3. Orchestration state model (implemented)
+
+`GET /api/matches/:id/state` includes `orchestration` with:
+
+- protocol metadata (`protocolVersion`, `source`, optional `triggerText`)
+- role metadata (`referee`, `fighterA`, `fighterB`)
+  - display name
+  - actor ID (optional)
+  - invitation status
+  - acceptance status
+  - join status
+  - joined source IP (fighter roles)
+- invitation summary counts
+- timeout windows + deadlines + remaining seconds
+- cancellation snapshot (reason/byRole/at/note)
+- group-chat bridge endpoint templates
+
+`GET /api/challenges/:id/orchestration` and `GET /api/orchestration/challenges/:id` expose orchestration snapshots directly.
+
+## 4. Endpoint map
+
+### 4.1 Group-chat boundary simulation (implemented)
+
+`POST /api/orchestration/group-chat-trigger`
+
+Purpose:
+
+- explicit bridge for future group-chat triggers
+- validates three participants in mention order
+- creates challenge with role assignment metadata
+
+Body:
+
+```json
+{
+  "triggerText": "optional text from chat trigger",
+  "participants": [
+    { "displayName": "Ref", "agentId": "optional" },
+    { "displayName": "A", "agentId": "optional" },
+    { "displayName": "B", "agentId": "optional" }
+  ],
+  "durationSec": 60,
+  "acceptanceTimeoutSec": 180,
+  "joinTimeoutSec": 120
+}
+```
+
+### 4.2 Invitation orchestration events (implemented)
+
+`POST /api/orchestration/challenges/:id/invitations/respond`
+
+Body:
+
+```json
+{
+  "role": "fighterA|fighterB",
+  "decision": "accepted|declined",
+  "note": "optional"
+}
+```
+
+- `declined` immediately cancels challenge with reason `fighter_declined_invitation`.
+
+### 4.3 Referee cancellation (implemented)
+
+`POST /api/orchestration/challenges/:id/cancel`
+
+Body:
+
+```json
+{
+  "reason": "referee_cancelled|fighter_declined_invitation|acceptance_timeout|join_timeout|protocol_violation",
+  "note": "optional",
+  "byRole": "referee|fighterA|fighterB|system"
+}
+```
+
+### 4.4 Runtime endpoints (implemented)
+
+- `POST /api/challenges`
+- `POST /api/challenges/:id/accept`
+- `POST /api/matches/:id/join`
+- `POST /api/matches/:id/action`
+- `GET /api/matches/:id/state`
+- `GET /api/matches/:id/events`
+- `GET /api/matches/:id/report`
+- `GET /match/:id`
+
+## 5. Timeout behavior
+
+Implemented timeout windows:
+
+- acceptance timeout starts at challenge creation
+- join timeout starts when both fighters accepted
+
+If timeout expires before required condition:
+
+- challenge transitions to `cancelled`
+- cancellation reason is recorded
+- summary and events are emitted
+
+## 6. What is implemented vs external integration
+
+Implemented now:
+
+- deterministic in-memory three-role orchestration state
+- orchestration-oriented APIs for trigger mapping and invitation/cancel events
+- pre-match visibility in spectator UI
+- runtime BO1 engine + report/event surfaces
+
+Still external to this repo:
+
+- real OpenClaw group-chat listener + mention parser
+- real OpenClaw-to-OpenClaw token delivery transport
+- real three-machine execution and network/auth hardening

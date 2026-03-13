@@ -54,7 +54,10 @@ body {
   font-size: 1.7rem;
 }
 
-.phase-panel {
+.phase-panel,
+.orchestration-panel,
+.log-wrap,
+.result {
   margin-top: 12px;
   background: rgba(17, 24, 39, 0.78);
   border: 1px solid #334155;
@@ -62,20 +65,43 @@ body {
   padding: 10px 12px;
 }
 
-.phase-panel h2 {
+.phase-panel h2,
+.orchestration-panel h2,
+.log-wrap h3 {
   margin: 0;
   font-size: 1rem;
 }
 
-.phase-panel p {
+.phase-panel p,
+.orchestration-panel p {
   margin: 6px 0 0;
 }
 
-.phase-grid {
+.phase-grid,
+.orchestration-meta {
   margin-top: 6px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px 12px;
+}
+
+.role-table {
+  margin-top: 10px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.role-table th,
+.role-table td {
+  border-bottom: 1px solid #334155;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.role-table th {
+  color: #93c5fd;
+  font-weight: 700;
 }
 
 .arena-wrap {
@@ -140,39 +166,16 @@ body {
 
 .status-row {
   margin-top: 12px;
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  align-items: flex-start;
-}
-
-.result {
-  background: rgba(17, 24, 39, 0.85);
-  border: 1px solid #475569;
-  border-radius: 10px;
-  padding: 10px;
 }
 
 .hidden {
   display: none;
 }
 
-.log-wrap {
-  margin-top: 14px;
-  background: rgba(17, 24, 39, 0.78);
-  border: 1px solid #334155;
-  border-radius: 12px;
-  padding: 10px;
-}
-
-.log-wrap h3 {
-  margin: 0 0 8px;
-}
-
 #log {
   margin: 0;
   padding-left: 18px;
-  max-height: 220px;
+  max-height: 260px;
   overflow-y: auto;
   color: #d1d5db;
 }
@@ -182,16 +185,30 @@ body {
   font-size: 0.92rem;
 }
 
+@media (max-width: 900px) {
+  .role-table {
+    font-size: 0.85rem;
+  }
+
+  .role-table th,
+  .role-table td {
+    padding: 5px 4px;
+  }
+}
+
 @media (max-width: 780px) {
-  .hud {
+  .hud,
+  .phase-grid,
+  .orchestration-meta {
     grid-template-columns: 1fr;
   }
 
-  .status-row {
+  .topbar {
+    align-items: flex-start;
     flex-direction: column;
   }
 
-  .phase-grid {
-    grid-template-columns: 1fr;
+  .timer {
+    text-align: left;
   }
 }

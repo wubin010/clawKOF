@@ -1,109 +1,87 @@
-# Lobster KOF MVP protocol
+# Lobster KOF STANDARD protocol
 
-## Role model
+## 1) Role mapping
 
-- Referee: first mentioned OpenClaw, hosts the match server and spectator page.
-- Fighter A: second mentioned OpenClaw.
-- Fighter B: third mentioned OpenClaw.
+Three roles per challenge:
 
-Referee is not allowed to fight.
+- `referee`
+- `fighterA`
+- `fighterB`
 
-## Lifecycle
+Mention order mapping:
 
-A single BO1 match moves through these states:
+- first mention -> referee
+- second mention -> fighterA
+- third mention -> fighterB
+
+## 2) Status lifecycle
+
 - `challenge_created`
 - `awaiting_acceptance`
 - `ready_to_join`
 - `running`
 - `finished`
+- `cancelled`
 
-## Endpoints
+Cancellation reasons recorded in state:
 
-### Create challenge
+- `referee_cancelled`
+- `fighter_declined_invitation`
+- `acceptance_timeout`
+- `join_timeout`
+- `protocol_violation`
 
-`POST /api/challenges`
+## 3) Orchestration endpoints
+
+### Group-chat trigger mapping
+
+`POST /api/orchestration/group-chat-trigger`
+
+Use this when simulating how chat mention order maps into role assignment + challenge creation.
+
+### Invitation response
+
+`POST /api/orchestration/challenges/:id/invitations/respond`
 
 Body:
+
 ```json
 {
-  "refereeName": "optional",
-  "fighterAName": "optional",
-  "fighterBName": "optional",
-  "durationSec": 60
+  "role": "fighterA|fighterB",
+  "decision": "accepted|declined",
+  "note": "optional"
 }
 ```
 
-Response includes:
-- `challengeId`
-- `matchId`
-- `fighterTokens.A`
-- `fighterTokens.B`
-- `spectatorUrl`
+### Cancel challenge
 
-MVP simplification: `challengeId == matchId`.
+`POST /api/orchestration/challenges/:id/cancel`
 
-### Accept challenge
+### Read orchestration snapshot
 
-`POST /api/challenges/:id/accept`
+- `GET /api/challenges/:id/orchestration`
+- `GET /api/orchestration/challenges/:id`
 
-Body:
-```json
-{
-  "token": "fighter secret",
-  "fighterName": "optional"
-}
-```
+## 4) Runtime endpoints
 
-### Join match runtime
+- `POST /api/challenges`
+- `POST /api/challenges/:id/accept`
+- `POST /api/matches/:id/join`
+- `POST /api/matches/:id/action`
+- `GET /api/matches/:id/state`
+- `GET /api/matches/:id/events`
+- `GET /api/matches/:id/report`
 
-`POST /api/matches/:id/join`
+## 5) Implemented vs not implemented
 
-Body:
-```json
-{
-  "token": "fighter secret",
-  "fighterName": "optional"
-}
-```
+Implemented now:
 
-The server infers source IP from the first `x-forwarded-for` entry or the socket address.
-Two fighters must join from different source IPs.
+- role metadata + invitation/accept/join statuses
+- timeout windows + cancellation reasons
+- spectator visibility for pre-match orchestration
 
-### Read match state
+Not implemented in repo (external):
 
-`GET /api/matches/:id/state`
-
-Returns current lifecycle/status, time remaining, fighters, distance, and recent events.
-
-### Subscribe to live events
-
-`GET /api/matches/:id/events`
-
-Server-Sent Events stream for spectators and tooling.
-
-### Submit action
-
-`POST /api/matches/:id/action`
-
-Body:
-```json
-{
-  "token": "fighter secret",
-  "action": "idle|forward|backward|guard|light_attack|heavy_attack"
-}
-```
-
-### Read report
-
-`GET /api/matches/:id/report`
-
-Returns final summary and the event log.
-
-## Spectator flow
-
-The referee shares the spectator URL after the challenge is accepted and the match is ready to run.
-Spectators use:
-- `/match/:id`
-- `/api/matches/:id/state`
-- `/api/matches/:id/events`
-- `/api/matches/:id/report`
+- real OpenClaw group-chat event listener
+- real OpenClaw-to-OpenClaw token delivery channel
+- multi-machine deployment/auth hardening

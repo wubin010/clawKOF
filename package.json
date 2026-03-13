@@ -5,9 +5,11 @@
   "description": "MVP scaffold for Lobster King of Fighters internal-network spectator game",
   "main": "src/server.ts",
   "scripts": {
-    "build": "node --experimental-strip-types --check src/matchEngine.ts && node --experimental-strip-types --check src/demoMode.ts && node --experimental-strip-types --check src/server.ts",
+    "build": "node --experimental-strip-types --check src/matchEngine.ts && node --experimental-strip-types --check src/orchestration.ts && node --experimental-strip-types --check src/demoMode.ts && node --experimental-strip-types --check src/server.ts && node --experimental-strip-types --check src/fighter.ts && node --experimental-strip-types --check src/referee.ts",
     "start": "node --experimental-strip-types src/server.ts",
-    "dev": "node --watch --experimental-strip-types src/server.ts"
+    "dev": "node --watch --experimental-strip-types src/server.ts",
+    "referee": "node --experimental-strip-types src/referee.ts",
+    "fighter": "node --experimental-strip-types src/fighter.ts"
   },
   "engines": {
     "node": ">=18"

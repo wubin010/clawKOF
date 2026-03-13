@@ -1,45 +1,56 @@
-# Product Requirements Document: Lobster King of Fighters (MVP Scaffold)
+# Product Requirements Document: Lobster King of Fighters (STANDARD Scaffold)
 
 ## 1. Product Scope
-Lobster King of Fighters is an internal-network spectator fighting game.
 
-- It is initiated from group-chat context (trigger phrase concept only for now).
-- Exactly three OpenClaw agents are involved conceptually:
-  - Agent 1: referee/host
-  - Agent 2: fighter A
-  - Agent 3: fighter B
+Lobster King of Fighters is an internal-network spectator fighting game scaffold.
+
+- It models group-chat initiation but does not yet consume real OpenClaw chat events.
+- Exactly three roles are represented:
+  - `referee` (host only)
+  - `fighterA`
+  - `fighterB`
 - Referee is not a fighter.
-- Referee hosts match server and spectator page.
 - Match format is BO1.
 
-Out of scope:
-- Real OpenClaw chat integration.
-- Multi-match tournaments, persistence, auth hardening, and production-scale reliability.
+Out of scope for this repo:
+
+- Real OpenClaw group-chat ingestion and outbound messaging.
+- Production security hardening and persistence.
+- Tournament-level/multi-match orchestration.
 
 ## 2. Core Functional Requirements
 
-### 2.1 Network and Role Rules
-- Fighters join remotely through HTTP protocol.
-- MVP includes local mock mode so demo can run without remote agents.
-- The two fighters must join from distinct source IPs.
-- Referee validates source IP uniqueness at join time.
-- Referee shares fighter tokens to fighters out-of-band.
+### 2.1 Orchestration model
 
-### 2.2 Pre-Match Lifecycle
-- Challenge lifecycle states:
+- Formal role metadata must exist in challenge state for referee/fighterA/fighterB.
+- Role records must include invitation, acceptance, and join statuses.
+- Orchestration state must include timeout windows and terminal cancellation metadata.
+
+### 2.2 Network and role constraints
+
+- Fighters join remotely through HTTP.
+- Fighters must join from distinct source IPs.
+- Referee validates source IP uniqueness at join time.
+- Token sharing is out-of-band in this scaffold.
+
+### 2.3 Pre-match lifecycle
+
+- Lifecycle states:
   - `challenge_created`
   - `awaiting_acceptance`
   - `ready_to_join`
   - `running`
   - `finished`
-- Referee creates the challenge.
-- Both fighters must explicitly accept before runtime join is allowed.
+  - `cancelled`
+- Both fighters must accept before runtime join is allowed.
 - Match starts only after both fighters join from distinct source IPs.
+- Pre-match timeout expiry must cancel challenge with explicit reason.
 
-### 2.3 Match Simulation
-- Turn/tick-based discrete decision engine.
+### 2.4 Runtime simulation
+
+- Tick-based discrete decision engine.
 - Tick interval: 1 second.
-- Core state: hp, energy, distance, timeRemaining, status.
+- Core runtime state: hp, energy, distance, timeRemaining, status.
 - Allowed actions:
   - `idle`
   - `forward`
@@ -47,39 +58,49 @@ Out of scope:
   - `guard`
   - `light_attack`
   - `heavy_attack`
-- Basic conflict resolution between both fighter actions each tick.
-- Action/event log available for spectators/report.
 
-### 2.4 Match End
-- BO1 end conditions include KO and timeout decision.
-- End page/state shows summary and report link.
+### 2.5 Match end and report
+
+- End conditions: KO or timeout decision.
+- Cancellation also produces terminal state details.
+- Report endpoint includes orchestration + runtime event log.
 
 ## 3. HTTP Interfaces
-Required endpoints:
 
-- `GET /` -> redirect or render current match page
-- `GET /match/:id` -> spectator page
+Required runtime endpoints:
+
+- `GET /`
+- `GET /match/:id`
 - `GET /api/matches/:id/state`
-- `GET /api/matches/:id/events` (SSE acceptable)
-- `POST /api/challenges` (dev only)
+- `GET /api/matches/:id/events`
+- `GET /api/matches/:id/report`
+- `POST /api/challenges`
 - `POST /api/challenges/:id/accept`
 - `POST /api/matches/:id/join`
 - `POST /api/matches/:id/action`
-- `GET /api/matches/:id/report`
 
-MVP simplification:
-- `challengeId` and `matchId` are the same identifier.
+Required orchestration endpoints:
+
+- `POST /api/orchestration/group-chat-trigger`
+- `POST /api/orchestration/challenges/:id/invitations/respond`
+- `POST /api/orchestration/challenges/:id/cancel`
+- `GET /api/challenges/:id/orchestration`
+- `GET /api/orchestration/challenges/:id`
 
 ## 4. Spectator UX Requirements
-- Read-only single-match page on internal port.
-- Visual style should feel like a 2D fighter, while backend remains discrete/tick-based.
-- Show pre-match lifecycle and readiness details.
-- Show hp, energy, timer, current action, and action log.
-- Animate between state updates so combat appears continuous.
-- On finish, show result summary and report link.
+
+- Read-only single-match page.
+- Pre-match orchestration state must be visible and stable:
+  - role table
+  - invitation/accept/join statuses
+  - timeout deadlines and remaining windows
+  - cancellation reason (if applicable)
+- Runtime view shows HP/energy/timer/actions/event log.
+- End-state panel links report JSON.
 
 ## 5. Non-Functional Requirements
-- Keep implementation small and understandable.
-- In-memory MVP state is acceptable.
-- Include code comments for protocol assumptions.
+
+- Keep implementation conservative and explicit.
+- In-memory state is acceptable for scaffold.
+- Protocol assumptions should be documented in code/docs.
 - Must pass `npm install && npm run build`.

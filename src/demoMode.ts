@@ -13,6 +13,7 @@ export async function runDemoMode(baseUrl: string): Promise<DemoInfo> {
       fighterAName: 'Claw Alpha',
       fighterBName: 'Claw Beta',
       durationSec: 60,
+      orchestrationSource: 'demo_mode',
     }),
   });
   if (!createdResponse.ok) {

@@ -1,101 +1,205 @@
-# Lobster King of Fighters (MVP Scaffold)
+# Lobster King of Fighters (STANDARD Scaffold)
 
-Small TypeScript/Node scaffold for an internal-network spectator fighting game.
+TypeScript/Node scaffold for an internal-network spectator fighting game with a **formal three-role orchestration layer**.
 
-## Quickstart
+This repository now implements the STANDARD path in-process, and intentionally stops at the boundary where real OpenClaw cross-machine/group-chat wiring would begin.
+
+## For OpenClaw: Deploy & Play
+
+### Prerequisites
+
+- Node.js >= 18 (with `--experimental-strip-types` support; Node 22+ recommended)
+- Zero npm dependencies — no `npm install` needed
+
+### Deploy (one command)
 
 ```bash
-npm install
+git clone <this-repo> && cd clawKOF && npm run build
+```
+
+`npm run build` only does type-checking, no compile step. The project runs TypeScript directly.
+
+### Play: 3-Agent Match
+
+A match requires **3 OpenClaws** (or 3 terminals): 1 referee + 2 fighters.
+
+**Step 1 — Referee starts the match:**
+
+```bash
+npm run referee
+# or: npm run referee -- --port 3456 --duration 60
+```
+
+The referee script starts a server, creates a challenge, and prints output like:
+
+```
+=== LOBSTER KOF MATCH CREATED ===
+Match ID: <uuid>
+Spectator URL: http://localhost:3000/match/<uuid>
+
+Fighter A token: <uuid-a>
+Fighter B token: <uuid-b>
+
+Fighters run:
+  node --experimental-strip-types src/fighter.ts --server http://localhost:3000 --match-id <id> --token <uuid-a> --name "Fighter A"
+  node --experimental-strip-types src/fighter.ts --server http://localhost:3000 --match-id <id> --token <uuid-b> --name "Fighter B"
+=================================
+```
+
+Referee distributes token A to fighterA, token B to fighterB (never cross-share).
+
+**Step 2 — Each fighter joins:**
+
+```bash
+npm run fighter -- --server http://<referee-ip>:<port> --match-id <id> --token <your-token> --name "YourName"
+```
+
+The fighter script auto-handles accept and join. Once both fighters join, the match starts automatically.
+
+**Step 3 — Fight!**
+
+Each tick (~1 second), the fighter script prints match state to stdout and waits for one action on stdin:
+
+```
+--- TICK 5 ---
+Time: 5s / 60s
+
+YOU (A - "Alpha"):
+  HP: 88/100  Energy: 40/100  Position: 31
+
+OPPONENT (B - "Beta"):
+  HP: 76/100  Energy: 55/100  Position: 69
+  Last action: light_attack
+
+Distance: 38
+
+Actions: idle | forward | backward | guard | light_attack | heavy_attack
+YOUR_ACTION>
+```
+
+Type an action and press Enter. The agent LLM reads the state and decides autonomously — the script is a pure communication pipe with zero built-in strategy.
+
+**Step 4 — Watch live:**
+
+Open the Spectator URL in a browser to see real-time combat animation, HP bars, and event log.
+
+**Step 5 — Results:**
+
+When the match ends (KO or timeout), all three terminals print results and exit automatically. The browser spectator page also shows the final result.
+
+### Quick Demo (solo, no agents)
+
+```bash
+DEMO_MODE=1 npm start
+```
+
+Starts the server with two auto-piloted bots. Open `http://localhost:3000/match/<id>` (printed in console) to watch.
+
+### Combat Cheat Sheet
+
+| Action | Energy | Range | Damage | Notes |
+|---|---|---|---|---|
+| `forward` | 0 | — | — | Move 6 units toward opponent |
+| `backward` | 0 | — | — | Move 6 units away; reduces edge-range damage to 50% |
+| `guard` | 0 | — | — | Reduces incoming damage to 45% |
+| `light_attack` | 20 | 20 | 12 | Fast, long range |
+| `heavy_attack` | 35 | 14 | 22 | Slow, high damage, short range |
+| `idle` | 0 | — | — | Do nothing |
+
+- Energy regenerates +10 per tick. Starting: 100 HP, 30 energy.
+- Initial positions: A=25, B=75 (distance 50). You must `forward` several times before attacks can reach.
+
+## Quickstart (Server Only)
+
+```bash
 npm run build
 npm start
 ```
 
-Server defaults to `http://localhost:3000`.
+Server default: `http://localhost:3000`
 
-With demo mode enabled (default), startup auto-creates one challenge and completes this full sequence over HTTP:
+Default startup is now **STANDARD mode** (no auto-bot orchestration).
 
-- create challenge
-- both fighters accept
-- both fighters join from distinct mock IPs
-- match auto-starts and bots submit actions
+## STANDARD Roles
 
-- Spectator page: `GET /match/:id`
-- Latest match shortcut: `GET /`
+The protocol is always modeled as exactly three roles:
 
-Disable demo mode:
+- `referee` (host only, never fights)
+- `fighterA`
+- `fighterB`
 
-```bash
-DEMO_MODE=0 npm start
-```
+Role assignment in group-chat mention order is represented by the orchestration endpoint:
 
-## Scripts
+- first mention -> referee
+- second mention -> fighterA
+- third mention -> fighterB
 
-- `npm run build` syntax-check TypeScript sources via Node type-stripping parser
-- `npm start` run server directly from TypeScript via Node type stripping
-- `npm run dev` run with file watch via Node type stripping
-
-## Architecture Summary
+## Key Modules
 
 - **Node HTTP API server** (`src/server.ts`)
-  - Exposes required challenge, match, and spectator endpoints.
-  - Serves static spectator assets under `/static`.
-  - Streams updates via Server-Sent Events.
-- **In-memory match engine** (`src/matchEngine.ts`)
-  - BO1 lifecycle machine:
-    - `challenge_created` -> `awaiting_acceptance` -> `ready_to_join` -> `running` -> `finished`
-  - 1s tick loop and conflict resolution for actions.
-  - Validates distinct fighter source IPs on runtime join.
-  - Produces state snapshots, event logs, and report payload.
-- **Demo/mock mode** (`src/demoMode.ts`)
-  - Uses HTTP APIs to run the full protocol sequence before combat.
-- **Spectator front-end** (`public/spectator.html`, `public/spectator.css`, `public/spectator.js`)
-  - Read-only page showing lifecycle state, readiness, HP/energy/timer/actions/log.
-  - Canvas-based lobster animation interpolates between discrete ticks.
-  - End-state summary with report link.
+  - Serves spectator UI and API.
+  - Exposes orchestration-facing endpoints for group-chat trigger mapping, invitation responses, and cancellation.
+- **Orchestration mapping module** (`src/orchestration.ts`)
+  - Explicit boundary for converting a future group-chat trigger into STANDARD role assignment + challenge creation.
+- **In-memory engine/state machine** (`src/matchEngine.ts`)
+  - BO1 runtime engine.
+  - Pre-match orchestration state with role metadata, invitation/accept/join status, deadline tracking, and cancellation reasons.
+- **Spectator front-end** (`public/spectator.*`)
+  - Stable pre-match visibility for orchestration state and deadlines, then live combat view.
 
-## API Notes
+## Protocol Endpoints
 
-Create challenge (dev only):
+Core runtime endpoints:
 
-```bash
-curl -X POST http://localhost:3000/api/challenges \
-  -H 'content-type: application/json' \
-  -d '{"refereeName":"Ref","fighterAName":"A","fighterBName":"B"}'
-```
+- `POST /api/challenges` (manual challenge create, dev-only)
+- `POST /api/challenges/:id/accept`
+- `POST /api/matches/:id/join`
+- `POST /api/matches/:id/action`
+- `GET /api/matches/:id/state`
+- `GET /api/matches/:id/events` (SSE)
+- `GET /api/matches/:id/report`
 
-Accept challenge:
+Orchestration-oriented endpoints (STANDARD boundary):
 
-```bash
-curl -X POST http://localhost:3000/api/challenges/<id>/accept \
-  -H 'content-type: application/json' \
-  -d '{"token":"<fighter-token>","fighterName":"Claw A"}'
-```
+- `POST /api/orchestration/group-chat-trigger`
+- `POST /api/orchestration/challenges/:id/invitations/respond`
+- `POST /api/orchestration/challenges/:id/cancel`
+- `GET /api/challenges/:id/orchestration`
+- `GET /api/orchestration/challenges/:id`
 
-Join runtime (IP inferred from proxy or socket):
+Compatibility notes:
 
-```bash
-curl -X POST http://localhost:3000/api/matches/<id>/join \
-  -H 'content-type: application/json' \
-  -H 'x-forwarded-for: 10.0.0.11' \
-  -d '{"token":"<fighter-token>","fighterName":"Claw A"}'
-```
+- `challengeId == matchId` in this scaffold.
+- `POST /api/matches` remains as a legacy alias for challenge creation.
 
-Submit action:
+## Local STANDARD Flow (No Real Chat Wiring)
 
-```bash
-curl -X POST http://localhost:3000/api/matches/<id>/action \
-  -H 'content-type: application/json' \
-  -d '{"token":"<fighter-token>","action":"light_attack"}'
-```
+1. Simulate group-chat trigger with `POST /api/orchestration/group-chat-trigger`.
+2. Referee privately delivers token A and token B out-of-band.
+3. Optional invitation acknowledgements are recorded via `/api/orchestration/challenges/:id/invitations/respond`.
+4. Fighters call `/api/challenges/:id/accept` and `/api/matches/:id/join`.
+5. Engine auto-starts once both joined from distinct source IPs.
+6. Spectators watch `/match/:id`.
 
-MVP note:
-- `challengeId` and `matchId` are the same ID.
-- `POST /api/matches` is kept as a backward-compatible alias to challenge creation.
+## What remains for real three-machine integration
 
-## Protocol Reference
+The following work is intentionally not implemented in this repository:
 
-See `docs/PROTOCOL.md` for the group-chat to HTTP orchestration mapping.
+1. **Real group-chat trigger ingestion**
+- Wire OpenClaw chat events (keyword + mentions) to call `POST /api/orchestration/group-chat-trigger` automatically.
 
-## Scope Reminder
+2. **Real cross-machine role execution**
+- Run referee/fighter agents on separate OpenClaw machines and invoke accept/join/action endpoints from each role process.
 
-This scaffold intentionally does **not** implement real OpenClaw chat integration yet.
+3. **Real secure token delivery transport**
+- Replace manual/out-of-band token sharing with authenticated OpenClaw-to-OpenClaw delivery.
+
+4. **Production network/auth hardening**
+- Add authn/authz, replay protection, trusted proxy controls, and transport-level guarantees.
+
+5. **Operational reliability beyond in-memory MVP**
+- Add persistence, recovery/restart behavior, and long-lived orchestration durability.
+
+## Scope reminder
+
+This scaffold prioritizes correctness and explicit state boundaries over speed or convenience shortcuts.

@@ -14,8 +14,31 @@
     phaseLabel: document.getElementById('phase-label'),
     acceptance: document.getElementById('acceptance'),
     joins: document.getElementById('joins'),
+    invites: document.getElementById('invites'),
     distance: document.getElementById('distance'),
     tick: document.getElementById('tick'),
+    protocolVersion: document.getElementById('protocol-version'),
+    orchestrationSource: document.getElementById('orchestration-source'),
+    acceptDeadline: document.getElementById('accept-deadline'),
+    acceptRemaining: document.getElementById('accept-remaining'),
+    joinDeadline: document.getElementById('join-deadline'),
+    joinRemaining: document.getElementById('join-remaining'),
+    cancelReason: document.getElementById('cancel-reason'),
+    refName: document.getElementById('ref-name'),
+    refInvite: document.getElementById('ref-invite'),
+    refAccept: document.getElementById('ref-accept'),
+    refJoin: document.getElementById('ref-join'),
+    refIp: document.getElementById('ref-ip'),
+    faName: document.getElementById('fa-name'),
+    faInvite: document.getElementById('fa-invite'),
+    faAccept: document.getElementById('fa-accept'),
+    faJoin: document.getElementById('fa-join'),
+    faIp: document.getElementById('fa-ip'),
+    fbName: document.getElementById('fb-name'),
+    fbInvite: document.getElementById('fb-invite'),
+    fbAccept: document.getElementById('fb-accept'),
+    fbJoin: document.getElementById('fb-join'),
+    fbIp: document.getElementById('fb-ip'),
     aName: document.getElementById('a-name'),
     bName: document.getElementById('b-name'),
     aAccepted: document.getElementById('a-accepted'),
@@ -107,6 +130,12 @@
 
     targetState = state;
 
+    const orchestration = state.orchestration || {};
+    const roles = orchestration.roles || {};
+    const refRole = roles.referee || {};
+    const faRole = roles.fighterA || {};
+    const fbRole = roles.fighterB || {};
+
     const a = state.fighters[0];
     const b = state.fighters[1];
 
@@ -118,6 +147,29 @@
     els.joins.textContent = `${state.joins.joined}/${state.joins.total}`;
     els.distance.textContent = state.distance.toFixed(1);
     els.tick.textContent = String(state.tick);
+
+    const invitationSummary = orchestration.invitationSummary || { accepted: 0, pending: 0, declined: 0 };
+    els.invites.textContent = `${invitationSummary.accepted} accepted / ${invitationSummary.pending} pending / ${invitationSummary.declined} declined`;
+
+    els.protocolVersion.textContent = orchestration.protocolVersion || '--';
+    els.orchestrationSource.textContent = orchestration.source || '--';
+
+    const acceptanceTimeout = orchestration.timeouts ? orchestration.timeouts.acceptance : null;
+    const joinTimeout = orchestration.timeouts ? orchestration.timeouts.join : null;
+
+    els.acceptDeadline.textContent = formatDate(acceptanceTimeout && acceptanceTimeout.deadlineAt);
+    els.acceptRemaining.textContent = formatRemaining(acceptanceTimeout && acceptanceTimeout.remainingSec);
+    els.joinDeadline.textContent = formatDate(joinTimeout && joinTimeout.deadlineAt);
+    els.joinRemaining.textContent = formatRemaining(joinTimeout && joinTimeout.remainingSec);
+
+    const cancellation = orchestration.cancellation || {};
+    els.cancelReason.textContent = cancellation.isCancelled
+      ? `${cancellation.reason || 'cancelled'}${cancellation.note ? ` (${cancellation.note})` : ''}`
+      : 'none';
+
+    fillRoleRow(refRole, els.refName, els.refInvite, els.refAccept, els.refJoin, els.refIp);
+    fillRoleRow(faRole, els.faName, els.faInvite, els.faAccept, els.faJoin, els.faIp);
+    fillRoleRow(fbRole, els.fbName, els.fbInvite, els.fbAccept, els.fbJoin, els.fbIp);
 
     els.aName.textContent = `${a.slot}: ${a.name}`;
     els.bName.textContent = `${b.slot}: ${b.name}`;
@@ -139,13 +191,21 @@
 
     syncLog(state.recentEvents || []);
 
-    if (state.status === 'finished') {
+    if (state.status === 'finished' || state.status === 'cancelled') {
       els.result.classList.remove('hidden');
       els.summary.textContent = state.summary || 'Match over.';
       els.reportLink.href = `/api/matches/${state.id}/report`;
     } else {
       els.result.classList.add('hidden');
     }
+  }
+
+  function fillRoleRow(role, elName, elInvite, elAccept, elJoin, elIp) {
+    elName.textContent = role.displayName || '--';
+    elInvite.textContent = role.invitationStatus || '--';
+    elAccept.textContent = role.acceptanceStatus || '--';
+    elJoin.textContent = role.joinStatus || '--';
+    elIp.textContent = role.sourceIp || '--';
   }
 
   function phaseMessage(state) {
@@ -161,13 +221,34 @@
     if (state.status === 'running') {
       return 'Match is live.';
     }
+    if (state.status === 'cancelled') {
+      return 'Challenge cancelled before match start.';
+    }
     return 'Match finished.';
   }
 
+  function formatDate(value) {
+    if (!value) {
+      return '--';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '--';
+    }
+    return date.toLocaleString();
+  }
+
+  function formatRemaining(value) {
+    if (typeof value !== 'number') {
+      return '--';
+    }
+    return `${Math.max(0, Math.round(value))}s`;
+  }
+
   function syncLog(events) {
-    const items = events.slice(-12).map((event) => {
+    const items = events.slice(-16).map((event) => {
       const li = document.createElement('li');
-      li.textContent = `[${event.tick}] ${event.message}`;
+      li.textContent = `[${event.tick}] ${event.type}: ${event.message}`;
       return li;
     });
 

@@ -2,13 +2,20 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { URL } from 'url';
+import { createChallengeFromGroupChatTrigger } from './orchestration.ts';
 import { runDemoMode } from './demoMode.ts';
-import { isValidAction, MatchEngine } from './matchEngine.ts';
+import {
+  type ChallengeCancellationReason,
+  type ChallengeOrchestrationSource,
+  isValidAction,
+  MatchEngine,
+  type OrchestrationRole,
+} from './matchEngine.ts';
 
 const engine = new MatchEngine();
 
 const PORT = Number(process.env.PORT ?? 3000);
-const ENABLE_DEMO = process.env.DEMO_MODE !== '0';
+const ENABLE_DEMO = process.env.DEMO_MODE === '1';
 const TICK_INTERVAL_MS = 1000;
 
 const publicDir = path.join(process.cwd(), 'public');
@@ -36,6 +43,8 @@ server.listen(PORT, async () => {
     } catch (error) {
       console.error('Failed to start demo mode', error);
     }
+  } else {
+    console.log('STANDARD mode active. Create challenge via /api/orchestration/group-chat-trigger or /api/challenges.');
   }
 });
 
@@ -62,7 +71,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         <body style="font-family: sans-serif; padding: 24px;">
           <h1>Lobster King of Fighters</h1>
           <p>No active challenges yet.</p>
-          <p>Create one with POST <code>/api/challenges</code> (dev only) or restart with DEMO_MODE enabled.</p>
+          <p>Create one with POST <code>/api/orchestration/group-chat-trigger</code> (STANDARD simulation) or POST <code>/api/challenges</code> (manual).</p>
+          <p>Optional local shortcut demo can be enabled with <code>DEMO_MODE=1</code>.</p>
         </body>
       </html>
       `
@@ -88,6 +98,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
+  const orchestrationRoute = pathname.match(/^\/api\/challenges\/([^/]+)\/orchestration$/);
+  if (method === 'GET' && orchestrationRoute) {
+    const snapshot = engine.getOrchestrationState(orchestrationRoute[1]);
+    sendJson(res, 200, snapshot);
+    return;
+  }
+
+  const orchestrationRouteAlt = pathname.match(/^\/api\/orchestration\/challenges\/([^/]+)$/);
+  if (method === 'GET' && orchestrationRouteAlt) {
+    const snapshot = engine.getOrchestrationState(orchestrationRouteAlt[1]);
+    sendJson(res, 200, snapshot);
+    return;
+  }
+
   const reportRoute = pathname.match(/^\/api\/matches\/([^/]+)\/report$/);
   if (method === 'GET' && reportRoute) {
     const report = engine.getReport(reportRoute[1]);
@@ -103,6 +127,36 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/orchestration/group-chat-trigger') {
+    if (process.env.NODE_ENV === 'production') {
+      sendJson(res, 403, { error: 'Group-chat trigger simulation endpoint is disabled outside dev mode.' });
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    const participants = Array.isArray(body.participants)
+      ? body.participants.map((entry) => ({
+          displayName: asOptionalString((entry as Record<string, unknown>).displayName) ?? '',
+          agentId: asOptionalString((entry as Record<string, unknown>).agentId),
+        }))
+      : [];
+
+    const result = createChallengeFromGroupChatTrigger(engine, {
+      triggerText: asOptionalString(body.triggerText),
+      participants,
+      durationSec: toOptionalNumber(body.durationSec),
+      acceptanceTimeoutSec: toOptionalNumber(body.acceptanceTimeoutSec),
+      joinTimeoutSec: toOptionalNumber(body.joinTimeoutSec),
+    });
+
+    sendJson(res, 201, {
+      ...result,
+      spectatorUrl: `/match/${result.challenge.matchId}`,
+      protocolNote: 'No real OpenClaw group-chat wiring yet; this endpoint is the mapping boundary.',
+    });
+    return;
+  }
+
   if (method === 'POST' && pathname === '/api/challenges') {
     if (process.env.NODE_ENV === 'production') {
       sendJson(res, 403, { error: 'Challenge creation endpoint is disabled outside dev mode.' });
@@ -114,18 +168,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       refereeName: asOptionalString(body.refereeName),
       fighterAName: asOptionalString(body.fighterAName),
       fighterBName: asOptionalString(body.fighterBName),
+      refereeAgentId: asOptionalString(body.refereeAgentId),
+      fighterAAgentId: asOptionalString(body.fighterAAgentId),
+      fighterBAgentId: asOptionalString(body.fighterBAgentId),
       durationSec: toOptionalNumber(body.durationSec),
+      acceptanceTimeoutSec: toOptionalNumber(body.acceptanceTimeoutSec),
+      joinTimeoutSec: toOptionalNumber(body.joinTimeoutSec),
+      orchestrationSource: asOrchestrationSource(body.orchestrationSource) ?? 'manual_api',
+      triggerText: asOptionalString(body.triggerText),
     });
 
     sendJson(res, 201, {
       ...created,
-      note: 'MVP protocol uses challengeId == matchId for runtime and spectator routes.',
+      note: 'STANDARD protocol keeps challengeId == matchId in this in-memory scaffold.',
       spectatorUrl: `/match/${created.matchId}`,
     });
     return;
   }
 
-  // Backward-compatible alias for older scripts and docs in this MVP branch.
+  // Backward-compatible alias for older scripts and docs in this repo.
   if (method === 'POST' && pathname === '/api/matches') {
     if (process.env.NODE_ENV === 'production') {
       sendJson(res, 403, { error: 'Challenge creation endpoint is disabled outside dev mode.' });
@@ -137,14 +198,63 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       refereeName: asOptionalString(body.refereeName),
       fighterAName: asOptionalString(body.fighterAName),
       fighterBName: asOptionalString(body.fighterBName),
+      refereeAgentId: asOptionalString(body.refereeAgentId),
+      fighterAAgentId: asOptionalString(body.fighterAAgentId),
+      fighterBAgentId: asOptionalString(body.fighterBAgentId),
       durationSec: toOptionalNumber(body.durationSec),
+      acceptanceTimeoutSec: toOptionalNumber(body.acceptanceTimeoutSec),
+      joinTimeoutSec: toOptionalNumber(body.joinTimeoutSec),
+      orchestrationSource: asOrchestrationSource(body.orchestrationSource) ?? 'manual_api',
+      triggerText: asOptionalString(body.triggerText),
     });
 
     sendJson(res, 201, {
       ...created,
-      note: 'Use POST /api/challenges in new clients. MVP keeps challengeId == matchId.',
+      note: 'Use POST /api/challenges or /api/orchestration/group-chat-trigger in new clients.',
       spectatorUrl: `/match/${created.matchId}`,
     });
+    return;
+  }
+
+  const invitationResponseRoute = pathname.match(
+    /^\/api\/orchestration\/challenges\/([^/]+)\/invitations\/respond$/
+  );
+  if (method === 'POST' && invitationResponseRoute) {
+    const challengeId = invitationResponseRoute[1];
+    const body = await readJsonBody(req);
+    const role = asInvitationRole(body.role);
+    const decision = asInvitationDecision(body.decision);
+
+    if (!role) {
+      sendJson(res, 400, { error: 'role must be fighterA or fighterB.' });
+      return;
+    }
+    if (!decision) {
+      sendJson(res, 400, { error: 'decision must be accepted or declined.' });
+      return;
+    }
+
+    const state = engine.recordInvitationResponse(
+      challengeId,
+      role,
+      decision,
+      asOptionalString(body.note)
+    );
+
+    sendJson(res, 200, state);
+    return;
+  }
+
+  const cancelRoute = pathname.match(/^\/api\/orchestration\/challenges\/([^/]+)\/cancel$/);
+  if (method === 'POST' && cancelRoute) {
+    const challengeId = cancelRoute[1];
+    const body = await readJsonBody(req);
+
+    const reason = asCancellationReason(body.reason) ?? 'referee_cancelled';
+    const byRole = asCancelByRole(body.byRole) ?? 'referee';
+
+    const state = engine.cancelChallenge(challengeId, reason, asOptionalString(body.note), byRole);
+    sendJson(res, 200, state);
     return;
   }
 
@@ -331,4 +441,45 @@ function toOptionalNumber(value: unknown): number | undefined {
     return undefined;
   }
   return parsed;
+}
+
+function asInvitationRole(value: unknown): Exclude<OrchestrationRole, 'referee'> | null {
+  if (value === 'fighterA' || value === 'fighterB') {
+    return value;
+  }
+  return null;
+}
+
+function asInvitationDecision(value: unknown): 'accepted' | 'declined' | null {
+  if (value === 'accepted' || value === 'declined') {
+    return value;
+  }
+  return null;
+}
+
+function asCancellationReason(value: unknown): ChallengeCancellationReason | null {
+  if (
+    value === 'referee_cancelled' ||
+    value === 'fighter_declined_invitation' ||
+    value === 'acceptance_timeout' ||
+    value === 'join_timeout' ||
+    value === 'protocol_violation'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function asCancelByRole(value: unknown): OrchestrationRole | 'system' | null {
+  if (value === 'referee' || value === 'fighterA' || value === 'fighterB' || value === 'system') {
+    return value;
+  }
+  return null;
+}
+
+function asOrchestrationSource(value: unknown): ChallengeOrchestrationSource | null {
+  if (value === 'manual_api' || value === 'group_chat_trigger' || value === 'demo_mode') {
+    return value;
+  }
+  return null;
 }
