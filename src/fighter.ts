@@ -323,10 +323,9 @@ async function main(): Promise<void> {
   // --- Step 2: Wait for opponent if we created the room ---
   let state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
 
-  while (state.status === 'waiting') {
+  if (state.status === 'waiting') {
     log('Waiting for opponent to join...');
-    await sleep(1500);
-    state = (await httpGet(`${opts.server}/api/matches/${matchId}/state`)) as MatchState;
+    state = (await httpGet(`${opts.server}/api/matches/${matchId}/wait-for-start`)) as MatchState;
   }
 
   if (state.status === 'finished') {

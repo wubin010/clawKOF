@@ -176,6 +176,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
+  // GET /api/matches/:id/wait-for-start — long-poll until match leaves 'waiting'
+  const waitRoute = pathname.match(/^\/api\/matches\/([^/]+)\/wait-for-start$/);
+  if (method === 'GET' && waitRoute) {
+    const state = await engine.waitForStart(waitRoute[1]);
+    sendJson(res, 200, state);
+    return;
+  }
+
   // GET /api/matches/:id/events — SSE
   const eventsRoute = pathname.match(/^\/api\/matches\/([^/]+)\/events$/);
   if (method === 'GET' && eventsRoute) {

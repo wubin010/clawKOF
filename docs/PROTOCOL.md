@@ -103,6 +103,17 @@ Content-Type: application/json
 }
 ```
 
+### GET /api/matches/:id/wait-for-start — 等待比赛开始（长轮询）
+
+当 Fighter A 创建房间后处于 `waiting` 状态时，调用此端点会阻塞直到对手加入（状态变为 `running`）或等待超时（状态变为 `finished`）。
+
+- 如果比赛已经不是 `waiting` 状态，立即返回当前状态
+- 如果比赛正在等待，请求会挂起直到状态改变
+
+返回格式与 `GET /api/matches/:id/state` 一致。
+
+用途：fighter 脚本用此端点替代轮询，避免在等待期间产生无效请求和 stdout 静默。
+
 ### GET /api/matches/:id/events — SSE 实时事件流
 
 Server-Sent Events 流，用于观战页面实时更新。连接时会立即推送当前状态。事件类型：

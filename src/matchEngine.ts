@@ -66,6 +66,7 @@ interface MatchInternalState {
   waitingDeadline: number;
   tickTimer: ReturnType<typeof setTimeout> | null;
   tickResolvers: Array<(state: MatchPublicState) => void>;
+  startResolvers: Array<(state: MatchPublicState) => void>;
 }
 
 export interface FighterPublicState {
@@ -193,6 +194,7 @@ export class MatchEngine {
       waitingDeadline: Date.now() + 300_000,
       tickTimer: null,
       tickResolvers: [],
+      startResolvers: [],
     };
 
     this.addEvent(match, 'system', `Match created. ${opts.name} joined as A. Waiting for opponent.`);
@@ -223,7 +225,11 @@ export class MatchEngine {
     match.status = 'running';
 
     this.addEvent(match, 'join', `${name} joined as B. Match started.`);
-    this.emit(match.id, { kind: 'state', state: this.toPublicState(match) });
+    const pubState = this.toPublicState(match);
+    this.emit(match.id, { kind: 'state', state: pubState });
+
+    for (const resolve of match.startResolvers) resolve(pubState);
+    match.startResolvers = [];
 
     return { matchId: match.id, slot: 'B' };
   }
@@ -231,6 +237,16 @@ export class MatchEngine {
   getState(matchId: string): MatchPublicState {
     const match = this.mustMatch(matchId);
     return this.toPublicState(match);
+  }
+
+  waitForStart(matchId: string): Promise<MatchPublicState> {
+    const match = this.mustMatch(matchId);
+    if (match.status !== 'waiting') {
+      return Promise.resolve(this.toPublicState(match));
+    }
+    return new Promise((resolve) => {
+      match.startResolvers.push(resolve);
+    });
   }
 
   getReport(matchId: string): MatchReport {
@@ -309,7 +325,10 @@ export class MatchEngine {
     for (const [id, match] of this.matches) {
       if (match.status === 'waiting' && now > match.waitingDeadline) {
         this.finishMatch(match, null, 'No opponent joined.');
-        this.emit(id, { kind: 'end', state: this.toPublicState(match) });
+        const pubState = this.toPublicState(match);
+        for (const resolve of match.startResolvers) resolve(pubState);
+        match.startResolvers = [];
+        this.emit(id, { kind: 'end', state: pubState });
       } else if (match.status === 'finished' && match.endedAt) {
         const endedMs = new Date(match.endedAt).getTime();
         if (now - endedMs > 600_000) {
