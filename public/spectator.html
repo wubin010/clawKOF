@@ -19,6 +19,15 @@
         </div>
       </header>
 
+      <section class="phase-panel">
+        <h2>Lifecycle</h2>
+        <p id="phase-label">Preparing challenge...</p>
+        <div class="phase-grid">
+          <p>Acceptances: <strong id="acceptance">0/2</strong></p>
+          <p>Runtime joins: <strong id="joins">0/2</strong></p>
+        </div>
+      </section>
+
       <section class="arena-wrap">
         <canvas id="arena" width="960" height="420"></canvas>
       </section>
@@ -26,6 +35,7 @@
       <section class="hud">
         <article class="fighter" id="fighter-a">
           <h2 id="a-name">Fighter A</h2>
+          <p class="fighter-stage">Accepted: <strong id="a-accepted">no</strong> | Joined: <strong id="a-joined">no</strong></p>
           <div class="bar hp"><span id="a-hp-bar"></span></div>
           <p>HP: <strong id="a-hp">0</strong></p>
           <div class="bar energy"><span id="a-en-bar"></span></div>
@@ -35,6 +45,7 @@
 
         <article class="fighter" id="fighter-b">
           <h2 id="b-name">Fighter B</h2>
+          <p class="fighter-stage">Accepted: <strong id="b-accepted">no</strong> | Joined: <strong id="b-joined">no</strong></p>
           <div class="bar hp"><span id="b-hp-bar"></span></div>
           <p>HP: <strong id="b-hp">0</strong></p>
           <div class="bar energy"><span id="b-en-bar"></span></div>
@@ -45,7 +56,7 @@
 
       <section class="status-row">
         <div>
-          <p>Status: <strong id="status">waiting</strong></p>
+          <p>Status: <strong id="status">challenge_created</strong></p>
           <p>Distance: <strong id="distance">0</strong></p>
           <p>Tick: <strong id="tick">0</strong></p>
         </div>

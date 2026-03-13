@@ -11,10 +11,17 @@
     meta: document.getElementById('meta'),
     time: document.getElementById('time'),
     status: document.getElementById('status'),
+    phaseLabel: document.getElementById('phase-label'),
+    acceptance: document.getElementById('acceptance'),
+    joins: document.getElementById('joins'),
     distance: document.getElementById('distance'),
     tick: document.getElementById('tick'),
     aName: document.getElementById('a-name'),
     bName: document.getElementById('b-name'),
+    aAccepted: document.getElementById('a-accepted'),
+    bAccepted: document.getElementById('b-accepted'),
+    aJoined: document.getElementById('a-joined'),
+    bJoined: document.getElementById('b-joined'),
     aHp: document.getElementById('a-hp'),
     bHp: document.getElementById('b-hp'),
     aEnergy: document.getElementById('a-energy'),
@@ -106,11 +113,18 @@
     els.meta.textContent = `Match ${state.id} | Referee ${state.refereeName}`;
     els.time.textContent = String(state.timeRemaining);
     els.status.textContent = state.status;
+    els.phaseLabel.textContent = phaseMessage(state);
+    els.acceptance.textContent = `${state.acceptance.accepted}/${state.acceptance.total}`;
+    els.joins.textContent = `${state.joins.joined}/${state.joins.total}`;
     els.distance.textContent = state.distance.toFixed(1);
     els.tick.textContent = String(state.tick);
 
     els.aName.textContent = `${a.slot}: ${a.name}`;
     els.bName.textContent = `${b.slot}: ${b.name}`;
+    els.aAccepted.textContent = a.accepted ? 'yes' : 'no';
+    els.bAccepted.textContent = b.accepted ? 'yes' : 'no';
+    els.aJoined.textContent = a.joined ? 'yes' : 'no';
+    els.bJoined.textContent = b.joined ? 'yes' : 'no';
     els.aHp.textContent = String(Math.round(a.hp));
     els.bHp.textContent = String(Math.round(b.hp));
     els.aEnergy.textContent = String(Math.round(a.energy));
@@ -132,6 +146,22 @@
     } else {
       els.result.classList.add('hidden');
     }
+  }
+
+  function phaseMessage(state) {
+    if (state.status === 'challenge_created') {
+      return 'Challenge created. Waiting for both fighters to accept tokens.';
+    }
+    if (state.status === 'awaiting_acceptance') {
+      return 'One fighter accepted. Waiting for the second acceptance.';
+    }
+    if (state.status === 'ready_to_join') {
+      return 'Both fighters accepted. Waiting for runtime joins from distinct IPs.';
+    }
+    if (state.status === 'running') {
+      return 'Match is live.';
+    }
+    return 'Match finished.';
   }
 
   function syncLog(events) {
@@ -160,21 +190,34 @@
       anim.flashA *= 0.88;
       anim.flashB *= 0.88;
 
-      renderArena(a.currentAction, b.currentAction);
+      renderArena(a, b);
     }
 
     requestAnimationFrame(loop);
   }
 
-  function renderArena(actionA, actionB) {
+  function renderArena(a, b) {
     const w = canvas.width;
     const h = canvas.height;
 
     ctx.clearRect(0, 0, w, h);
 
     drawBackground(w, h);
-    drawFighter(0.5 + anim.aPos / 100, 0.72, '#f97316', true, actionA, anim.flashA);
-    drawFighter(0.5 + anim.bPos / 100, 0.72, '#38bdf8', false, actionB, anim.flashB);
+
+    const isRunning = targetState.status === 'running' || targetState.status === 'finished';
+    drawFighter(0.5 + anim.aPos / 100, 0.72, '#f97316', true, a.currentAction, anim.flashA, isRunning, a.joined);
+    drawFighter(0.5 + anim.bPos / 100, 0.72, '#38bdf8', false, b.currentAction, anim.flashB, isRunning, b.joined);
+
+    if (!isRunning) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(7, 15, 30, 0.45)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '700 30px "Trebuchet MS", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(targetState.status.replace(/_/g, ' ').toUpperCase(), w / 2, h / 2);
+      ctx.restore();
+    }
   }
 
   function drawBackground(w, h) {
@@ -193,30 +236,30 @@
     ctx.restore();
   }
 
-  function drawFighter(nx, ny, color, facingRight, action, flash) {
+  function drawFighter(nx, ny, color, facingRight, action, flash, isRunning, isJoined) {
     const w = canvas.width;
     const h = canvas.height;
     const x = nx * w - w / 2;
     const y = ny * h;
 
-    const bob = Math.sin(Date.now() / 140) * 3;
+    const bob = isRunning ? Math.sin(Date.now() / 140) * 3 : 0;
     const pulse = 1 + Math.sin(Date.now() / 200 + x * 0.03) * 0.015;
 
-    const attackBoost = action.includes('attack') ? 9 : 0;
-    const guardShift = action === 'guard' ? -4 : 0;
+    const attackBoost = isRunning && action.includes('attack') ? 9 : 0;
+    const guardShift = isRunning && action === 'guard' ? -4 : 0;
 
     ctx.save();
     ctx.translate(x, y + bob);
     ctx.scale(facingRight ? pulse : -pulse, pulse);
 
-    if (flash > 0.05) {
+    if (flash > 0.05 && isRunning) {
       ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.7, flash)})`;
       ctx.beginPath();
       ctx.arc(0, -40, 36, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    ctx.fillStyle = color;
+    ctx.fillStyle = isJoined ? color : 'rgba(148, 163, 184, 0.7)';
     ctx.beginPath();
     ctx.ellipse(0, -38 + guardShift, 34, 28, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -226,7 +269,7 @@
     ctx.arc(12, -47, 4, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = color;
+    ctx.fillStyle = isJoined ? color : 'rgba(148, 163, 184, 0.7)';
     ctx.beginPath();
     ctx.moveTo(24, -45);
     ctx.lineTo(48 + attackBoost, -65);

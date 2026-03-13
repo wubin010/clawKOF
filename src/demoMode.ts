@@ -5,7 +5,7 @@ interface DemoInfo {
 }
 
 export async function runDemoMode(baseUrl: string): Promise<DemoInfo> {
-  const createdResponse = await fetch(`${baseUrl}/api/matches`, {
+  const createdResponse = await fetch(`${baseUrl}/api/challenges`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -16,23 +16,44 @@ export async function runDemoMode(baseUrl: string): Promise<DemoInfo> {
     }),
   });
   if (!createdResponse.ok) {
-    throw new Error(`Unable to create demo match: ${createdResponse.status}`);
+    throw new Error(`Unable to create demo challenge: ${createdResponse.status}`);
   }
 
   const created = (await createdResponse.json()) as {
-    id: string;
+    matchId: string;
     fighterTokens: { A: string; B: string };
   };
 
   await Promise.all([
-    joinFighter(baseUrl, created.id, created.fighterTokens.A, 'Claw Alpha', '10.0.0.11'),
-    joinFighter(baseUrl, created.id, created.fighterTokens.B, 'Claw Beta', '10.0.0.12'),
+    acceptFighter(baseUrl, created.matchId, created.fighterTokens.A, 'Claw Alpha'),
+    acceptFighter(baseUrl, created.matchId, created.fighterTokens.B, 'Claw Beta'),
   ]);
 
-  driveBot(baseUrl, created.id, created.fighterTokens.A, 'A');
-  driveBot(baseUrl, created.id, created.fighterTokens.B, 'B');
+  await Promise.all([
+    joinFighter(baseUrl, created.matchId, created.fighterTokens.A, 'Claw Alpha', '10.0.0.11'),
+    joinFighter(baseUrl, created.matchId, created.fighterTokens.B, 'Claw Beta', '10.0.0.12'),
+  ]);
 
-  return { matchId: created.id };
+  driveBot(baseUrl, created.matchId, created.fighterTokens.A, 'A');
+  driveBot(baseUrl, created.matchId, created.fighterTokens.B, 'B');
+
+  return { matchId: created.matchId };
+}
+
+async function acceptFighter(
+  baseUrl: string,
+  challengeId: string,
+  token: string,
+  fighterName: string
+): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/challenges/${challengeId}/accept`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token, fighterName }),
+  });
+  if (!response.ok) {
+    throw new Error(`accept failed: ${response.status}`);
+  }
 }
 
 async function joinFighter(

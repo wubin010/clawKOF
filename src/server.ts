@@ -31,7 +31,7 @@ server.listen(PORT, async () => {
   if (ENABLE_DEMO) {
     try {
       const demo = await runDemoMode(`http://localhost:${PORT}`);
-      console.log(`Demo match created: ${demo.matchId}`);
+      console.log(`Demo challenge/match created: ${demo.matchId}`);
       console.log(`Spectator page: http://localhost:${PORT}/match/${demo.matchId}`);
     } catch (error) {
       console.error('Failed to start demo mode', error);
@@ -61,8 +61,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         <head><meta charset="utf-8" /><title>Lobster KOF Arena</title></head>
         <body style="font-family: sans-serif; padding: 24px;">
           <h1>Lobster King of Fighters</h1>
-          <p>No active matches yet.</p>
-          <p>Create one with POST <code>/api/matches</code> (dev only) or restart with DEMO_MODE enabled.</p>
+          <p>No active challenges yet.</p>
+          <p>Create one with POST <code>/api/challenges</code> (dev only) or restart with DEMO_MODE enabled.</p>
         </body>
       </html>
       `
@@ -103,14 +103,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
-  if (method === 'POST' && pathname === '/api/matches') {
+  if (method === 'POST' && pathname === '/api/challenges') {
     if (process.env.NODE_ENV === 'production') {
-      sendJson(res, 403, { error: 'Match creation endpoint is disabled outside dev mode.' });
+      sendJson(res, 403, { error: 'Challenge creation endpoint is disabled outside dev mode.' });
       return;
     }
 
     const body = await readJsonBody(req);
-    const created = engine.createMatch({
+    const created = engine.createChallenge({
       refereeName: asOptionalString(body.refereeName),
       fighterAName: asOptionalString(body.fighterAName),
       fighterBName: asOptionalString(body.fighterBName),
@@ -119,8 +119,47 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
     sendJson(res, 201, {
       ...created,
-      spectatorUrl: `/match/${created.id}`,
+      note: 'MVP protocol uses challengeId == matchId for runtime and spectator routes.',
+      spectatorUrl: `/match/${created.matchId}`,
     });
+    return;
+  }
+
+  // Backward-compatible alias for older scripts and docs in this MVP branch.
+  if (method === 'POST' && pathname === '/api/matches') {
+    if (process.env.NODE_ENV === 'production') {
+      sendJson(res, 403, { error: 'Challenge creation endpoint is disabled outside dev mode.' });
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    const created = engine.createChallenge({
+      refereeName: asOptionalString(body.refereeName),
+      fighterAName: asOptionalString(body.fighterAName),
+      fighterBName: asOptionalString(body.fighterBName),
+      durationSec: toOptionalNumber(body.durationSec),
+    });
+
+    sendJson(res, 201, {
+      ...created,
+      note: 'Use POST /api/challenges in new clients. MVP keeps challengeId == matchId.',
+      spectatorUrl: `/match/${created.matchId}`,
+    });
+    return;
+  }
+
+  const acceptRoute = pathname.match(/^\/api\/challenges\/([^/]+)\/accept$/);
+  if (method === 'POST' && acceptRoute) {
+    const challengeId = acceptRoute[1];
+    const body = await readJsonBody(req);
+    const token = String(body.token ?? '');
+    if (!token) {
+      sendJson(res, 400, { error: 'token is required.' });
+      return;
+    }
+
+    const state = engine.acceptChallenge(challengeId, token, asOptionalString(body.fighterName));
+    sendJson(res, 200, state);
     return;
   }
 

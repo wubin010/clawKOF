@@ -12,7 +12,12 @@ npm start
 
 Server defaults to `http://localhost:3000`.
 
-With demo mode enabled (default), startup auto-creates one match and two mock fighters join/play using HTTP endpoints.
+With demo mode enabled (default), startup auto-creates one challenge and completes this full sequence over HTTP:
+
+- create challenge
+- both fighters accept
+- both fighters join from distinct mock IPs
+- match auto-starts and bots submit actions
 
 - Spectator page: `GET /match/:id`
 - Latest match shortcut: `GET /`
@@ -32,32 +37,41 @@ DEMO_MODE=0 npm start
 ## Architecture Summary
 
 - **Node HTTP API server** (`src/server.ts`)
-  - Exposes required match and spectator endpoints.
+  - Exposes required challenge, match, and spectator endpoints.
   - Serves static spectator assets under `/static`.
   - Streams updates via Server-Sent Events.
 - **In-memory match engine** (`src/matchEngine.ts`)
-  - BO1 state machine (`waiting` -> `running` -> `finished`).
+  - BO1 lifecycle machine:
+    - `challenge_created` -> `awaiting_acceptance` -> `ready_to_join` -> `running` -> `finished`
   - 1s tick loop and conflict resolution for actions.
-  - Validates distinct fighter source IPs on join.
+  - Validates distinct fighter source IPs on runtime join.
   - Produces state snapshots, event logs, and report payload.
 - **Demo/mock mode** (`src/demoMode.ts`)
-  - Uses HTTP APIs to create a match, join two fighters with simulated distinct IPs, and submit actions.
+  - Uses HTTP APIs to run the full protocol sequence before combat.
 - **Spectator front-end** (`public/spectator.html`, `public/spectator.css`, `public/spectator.js`)
-  - Read-only page showing HP/energy/timer/actions/log.
+  - Read-only page showing lifecycle state, readiness, HP/energy/timer/actions/log.
   - Canvas-based lobster animation interpolates between discrete ticks.
   - End-state summary with report link.
 
 ## API Notes
 
-`POST /api/matches` (dev only) example:
+Create challenge (dev only):
 
 ```bash
-curl -X POST http://localhost:3000/api/matches \
+curl -X POST http://localhost:3000/api/challenges \
   -H 'content-type: application/json' \
   -d '{"refereeName":"Ref","fighterAName":"A","fighterBName":"B"}'
 ```
 
-Join example (IP inferred from proxy or socket):
+Accept challenge:
+
+```bash
+curl -X POST http://localhost:3000/api/challenges/<id>/accept \
+  -H 'content-type: application/json' \
+  -d '{"token":"<fighter-token>","fighterName":"Claw A"}'
+```
+
+Join runtime (IP inferred from proxy or socket):
 
 ```bash
 curl -X POST http://localhost:3000/api/matches/<id>/join \
@@ -66,13 +80,21 @@ curl -X POST http://localhost:3000/api/matches/<id>/join \
   -d '{"token":"<fighter-token>","fighterName":"Claw A"}'
 ```
 
-Submit action example:
+Submit action:
 
 ```bash
 curl -X POST http://localhost:3000/api/matches/<id>/action \
   -H 'content-type: application/json' \
   -d '{"token":"<fighter-token>","action":"light_attack"}'
 ```
+
+MVP note:
+- `challengeId` and `matchId` are the same ID.
+- `POST /api/matches` is kept as a backward-compatible alias to challenge creation.
+
+## Protocol Reference
+
+See `docs/PROTOCOL.md` for the group-chat to HTTP orchestration mapping.
 
 ## Scope Reminder
 

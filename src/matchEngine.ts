@@ -8,7 +8,12 @@ export type FighterAction =
   | 'light_attack'
   | 'heavy_attack';
 
-export type MatchStatus = 'waiting' | 'running' | 'finished';
+export type MatchStatus =
+  | 'challenge_created'
+  | 'awaiting_acceptance'
+  | 'ready_to_join'
+  | 'running'
+  | 'finished';
 
 type FighterSlot = 'A' | 'B';
 type Winner = FighterSlot | 'draw' | null;
@@ -25,7 +30,10 @@ const VALID_ACTIONS: FighterAction[] = [
 interface FighterInternalState {
   slot: FighterSlot;
   token: string;
+  accepted: boolean;
+  acceptedAt?: string;
   joined: boolean;
+  joinedAt?: string;
   name: string;
   sourceIp?: string;
   hp: number;
@@ -38,7 +46,7 @@ export interface MatchEvent {
   id: number;
   tick: number;
   at: string;
-  type: 'system' | 'join' | 'action' | 'tick' | 'end';
+  type: 'system' | 'accept' | 'join' | 'action' | 'tick' | 'end';
   message: string;
   payload?: Record<string, unknown>;
 }
@@ -63,6 +71,7 @@ interface MatchInternalState {
 export interface FighterPublicState {
   slot: FighterSlot;
   name: string;
+  accepted: boolean;
   joined: boolean;
   hp: number;
   energy: number;
@@ -79,6 +88,16 @@ export interface MatchPublicState {
   timeRemaining: number;
   maxDurationSec: number;
   distance: number;
+  acceptance: {
+    accepted: number;
+    total: number;
+    remaining: number;
+  };
+  joins: {
+    joined: number;
+    total: number;
+    remaining: number;
+  };
   fighters: [FighterPublicState, FighterPublicState];
   winner: Winner;
   summary: string | null;
@@ -97,6 +116,10 @@ export interface MatchReport {
   fighters: Array<{
     slot: FighterSlot;
     name: string;
+    accepted: boolean;
+    acceptedAt?: string;
+    joined: boolean;
+    joinedAt?: string;
     sourceIp?: string;
     hp: number;
     energy: number;
@@ -104,21 +127,27 @@ export interface MatchReport {
   events: MatchEvent[];
 }
 
-export interface CreateMatchInput {
+export interface CreateChallengeInput {
   refereeName?: string;
   fighterAName?: string;
   fighterBName?: string;
   durationSec?: number;
 }
 
-export interface CreateMatchResult {
+export type CreateMatchInput = CreateChallengeInput;
+
+export interface CreateChallengeResult {
   id: string;
+  challengeId: string;
+  matchId: string;
   refereeName: string;
   fighterTokens: {
     A: string;
     B: string;
   };
 }
+
+export type CreateMatchResult = CreateChallengeResult;
 
 export interface EngineUpdate {
   kind: 'state' | 'end' | 'event';
@@ -144,7 +173,7 @@ export class MatchEngine {
     return latest?.id ?? null;
   }
 
-  createMatch(input: CreateMatchInput = {}): CreateMatchResult {
+  createChallenge(input: CreateChallengeInput = {}): CreateChallengeResult {
     const id = randomUUID();
     const fighterAToken = randomUUID();
     const fighterBToken = randomUUID();
@@ -154,7 +183,7 @@ export class MatchEngine {
       id,
       createdAt: now,
       refereeName: input.refereeName ?? 'Referee',
-      status: 'waiting',
+      status: 'challenge_created',
       maxDurationSec: input.durationSec ?? 60,
       timeRemaining: input.durationSec ?? 60,
       tick: 0,
@@ -162,6 +191,7 @@ export class MatchEngine {
         {
           slot: 'A',
           token: fighterAToken,
+          accepted: false,
           joined: false,
           name: input.fighterAName ?? 'Fighter A',
           hp: 100,
@@ -172,6 +202,7 @@ export class MatchEngine {
         {
           slot: 'B',
           token: fighterBToken,
+          accepted: false,
           joined: false,
           name: input.fighterBName ?? 'Fighter B',
           hp: 100,
@@ -188,18 +219,28 @@ export class MatchEngine {
       nextEventId: 1,
     };
 
-    this.addEvent(match, 'system', 'Match created (BO1). Waiting for two fighters to join.');
+    this.addEvent(
+      match,
+      'system',
+      'Challenge created (BO1). Waiting for fighter token acceptances.'
+    );
     this.matches.set(id, match);
     this.emit(id, { kind: 'state', state: this.toPublicState(match) });
 
     return {
       id,
+      challengeId: id,
+      matchId: id,
       refereeName: match.refereeName,
       fighterTokens: {
         A: fighterAToken,
         B: fighterBToken,
       },
     };
+  }
+
+  createMatch(input: CreateChallengeInput = {}): CreateChallengeResult {
+    return this.createChallenge(input);
   }
 
   getState(matchId: string): MatchPublicState {
@@ -221,6 +262,10 @@ export class MatchEngine {
       fighters: match.fighters.map((fighter) => ({
         slot: fighter.slot,
         name: fighter.name,
+        accepted: fighter.accepted,
+        acceptedAt: fighter.acceptedAt,
+        joined: fighter.joined,
+        joinedAt: fighter.joinedAt,
         sourceIp: fighter.sourceIp,
         hp: fighter.hp,
         energy: fighter.energy,
@@ -229,17 +274,58 @@ export class MatchEngine {
     };
   }
 
-  joinMatch(matchId: string, token: string, sourceIp: string, fighterName?: string): MatchPublicState {
+  acceptChallenge(matchId: string, token: string, fighterName?: string): MatchPublicState {
     const match = this.mustMatch(matchId);
 
-    if (match.status !== 'waiting') {
-      throw new Error('Match is not accepting joins.');
+    if (match.status === 'running' || match.status === 'finished') {
+      throw new Error('Challenge is no longer accepting fighter confirmations.');
     }
 
     // Protocol assumption: fighter token is an out-of-band shared secret issued by referee.
     const fighter = match.fighters.find((candidate) => candidate.token === token);
     if (!fighter) {
       throw new Error('Invalid fighter token.');
+    }
+    if (fighter.accepted) {
+      throw new Error('Fighter already accepted the challenge.');
+    }
+
+    fighter.accepted = true;
+    fighter.acceptedAt = new Date().toISOString();
+    fighter.name = fighterName?.trim() || fighter.name;
+
+    this.addEvent(match, 'accept', `${fighter.slot} accepted the challenge.`, {
+      slot: fighter.slot,
+    });
+
+    const previousStatus = match.status;
+    this.recomputePreMatchStatus(match);
+    this.maybeAddLifecycleEvent(match, previousStatus);
+
+    const state = this.toPublicState(match);
+    this.emit(match.id, { kind: 'state', state });
+    return state;
+  }
+
+  joinMatch(matchId: string, token: string, sourceIp: string, fighterName?: string): MatchPublicState {
+    const match = this.mustMatch(matchId);
+
+    if (match.status === 'running') {
+      throw new Error('Match is already running.');
+    }
+    if (match.status === 'finished') {
+      throw new Error('Match has already finished.');
+    }
+    if (match.status !== 'ready_to_join') {
+      throw new Error('Match is not ready for joins. Both fighters must accept first.');
+    }
+
+    const fighter = match.fighters.find((candidate) => candidate.token === token);
+    if (!fighter) {
+      throw new Error('Invalid fighter token.');
+    }
+    if (!fighter.accepted) {
+      throw new Error('Fighter must accept challenge before joining runtime.');
     }
     if (fighter.joined) {
       throw new Error('Fighter already joined.');
@@ -251,19 +337,18 @@ export class MatchEngine {
     }
 
     fighter.joined = true;
+    fighter.joinedAt = new Date().toISOString();
     fighter.sourceIp = sourceIp;
     fighter.name = fighterName?.trim() || fighter.name;
 
-    this.addEvent(
-      match,
-      'join',
-      `${fighter.slot} joined from ${sourceIp}.`,
-      { slot: fighter.slot, sourceIp }
-    );
+    this.addEvent(match, 'join', `${fighter.slot} joined runtime from ${sourceIp}.`, {
+      slot: fighter.slot,
+      sourceIp,
+    });
 
     if (match.fighters.every((candidate) => candidate.joined)) {
       match.status = 'running';
-      this.addEvent(match, 'system', 'Both fighters joined. Match started.');
+      this.addEvent(match, 'system', 'Both fighters joined from distinct IPs. Match started.');
     }
 
     const state = this.toPublicState(match);
@@ -510,8 +595,40 @@ export class MatchEngine {
     }
   }
 
+  private recomputePreMatchStatus(match: MatchInternalState): void {
+    if (match.status === 'running' || match.status === 'finished') {
+      return;
+    }
+
+    const acceptedCount = match.fighters.filter((fighter) => fighter.accepted).length;
+    if (acceptedCount === 0) {
+      match.status = 'challenge_created';
+      return;
+    }
+    if (acceptedCount < match.fighters.length) {
+      match.status = 'awaiting_acceptance';
+      return;
+    }
+    match.status = 'ready_to_join';
+  }
+
+  private maybeAddLifecycleEvent(match: MatchInternalState, previousStatus: MatchStatus): void {
+    if (match.status === previousStatus) {
+      return;
+    }
+
+    if (match.status === 'awaiting_acceptance') {
+      this.addEvent(match, 'system', 'First acceptance received. Waiting for second fighter acceptance.');
+    } else if (match.status === 'ready_to_join') {
+      this.addEvent(match, 'system', 'Both fighters accepted. Waiting for runtime joins.');
+    }
+  }
+
   private toPublicState(match: MatchInternalState): MatchPublicState {
     const [a, b] = match.fighters;
+    const accepted = match.fighters.filter((fighter) => fighter.accepted).length;
+    const joined = match.fighters.filter((fighter) => fighter.joined).length;
+
     return {
       id: match.id,
       createdAt: match.createdAt,
@@ -521,10 +638,21 @@ export class MatchEngine {
       timeRemaining: match.timeRemaining,
       maxDurationSec: match.maxDurationSec,
       distance: Math.abs(a.position - b.position),
+      acceptance: {
+        accepted,
+        total: match.fighters.length,
+        remaining: match.fighters.length - accepted,
+      },
+      joins: {
+        joined,
+        total: match.fighters.length,
+        remaining: match.fighters.length - joined,
+      },
       fighters: [
         {
           slot: a.slot,
           name: a.name,
+          accepted: a.accepted,
           joined: a.joined,
           hp: a.hp,
           energy: a.energy,
@@ -534,6 +662,7 @@ export class MatchEngine {
         {
           slot: b.slot,
           name: b.name,
+          accepted: b.accepted,
           joined: b.joined,
           hp: b.hp,
           energy: b.energy,

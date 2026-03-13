@@ -16,7 +16,7 @@ body {
   margin: 0;
   color: var(--text);
   background: radial-gradient(circle at top, #1f2937 0%, var(--bg) 56%);
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
 }
 
 .layout {
@@ -54,6 +54,30 @@ body {
   font-size: 1.7rem;
 }
 
+.phase-panel {
+  margin-top: 12px;
+  background: rgba(17, 24, 39, 0.78);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.phase-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.phase-panel p {
+  margin: 6px 0 0;
+}
+
+.phase-grid {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .arena-wrap {
   margin-top: 14px;
   border-radius: 14px;
@@ -84,6 +108,11 @@ body {
 
 .fighter h2 {
   margin: 0 0 8px;
+}
+
+.fighter-stage {
+  margin: 0 0 8px;
+  color: #cbd5e1;
 }
 
 .bar {
@@ -160,5 +189,9 @@ body {
 
   .status-row {
     flex-direction: column;
+  }
+
+  .phase-grid {
+    grid-template-columns: 1fr;
   }
 }

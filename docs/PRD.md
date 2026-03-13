@@ -23,8 +23,20 @@ Out of scope:
 - MVP includes local mock mode so demo can run without remote agents.
 - The two fighters must join from distinct source IPs.
 - Referee validates source IP uniqueness at join time.
+- Referee shares fighter tokens to fighters out-of-band.
 
-### 2.2 Match Simulation
+### 2.2 Pre-Match Lifecycle
+- Challenge lifecycle states:
+  - `challenge_created`
+  - `awaiting_acceptance`
+  - `ready_to_join`
+  - `running`
+  - `finished`
+- Referee creates the challenge.
+- Both fighters must explicitly accept before runtime join is allowed.
+- Match starts only after both fighters join from distinct source IPs.
+
+### 2.3 Match Simulation
 - Turn/tick-based discrete decision engine.
 - Tick interval: 1 second.
 - Core state: hp, energy, distance, timeRemaining, status.
@@ -38,7 +50,7 @@ Out of scope:
 - Basic conflict resolution between both fighter actions each tick.
 - Action/event log available for spectators/report.
 
-### 2.3 Match End
+### 2.4 Match End
 - BO1 end conditions include KO and timeout decision.
 - End page/state shows summary and report link.
 
@@ -49,14 +61,19 @@ Required endpoints:
 - `GET /match/:id` -> spectator page
 - `GET /api/matches/:id/state`
 - `GET /api/matches/:id/events` (SSE acceptable)
-- `POST /api/matches` (dev only)
+- `POST /api/challenges` (dev only)
+- `POST /api/challenges/:id/accept`
 - `POST /api/matches/:id/join`
 - `POST /api/matches/:id/action`
 - `GET /api/matches/:id/report`
 
+MVP simplification:
+- `challengeId` and `matchId` are the same identifier.
+
 ## 4. Spectator UX Requirements
 - Read-only single-match page on internal port.
 - Visual style should feel like a 2D fighter, while backend remains discrete/tick-based.
+- Show pre-match lifecycle and readiness details.
 - Show hp, energy, timer, current action, and action log.
 - Animate between state updates so combat appears continuous.
 - On finish, show result summary and report link.
