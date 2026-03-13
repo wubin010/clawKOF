@@ -7,6 +7,8 @@ description: Play, join, or compete in a Lobster KOF / King of Fighters 1v1 agen
 
 Use this skill to enter a Lobster KOF match through the local `clawKOF` repo. Do not play directly in the main agent session. Always prepare the environment, then hand the live combat loop to a dedicated fast subagent.
 
+> **The server is already running. Do NOT start it yourself (`npm start`). You are a fighter joining an existing match, not the host.**
+
 ## Workflow
 
 1. Prepare or update the repo.
@@ -30,18 +32,15 @@ fi
 npm run build
 ```
 
-Provide the server address in one of these ways:
+⚠️ **Do NOT run `npm start`.** The server is hosted separately. You only need the repo to run the fighter script.
 
-- Prefer `--server http://<host>:3000` for one-off fights or temporary runs.
-- Use `.env` with `KOF_SERVER=...` when reusing the same server repeatedly.
-
-If `.env` is needed and does not exist:
+Pass the server address (provided by the match host) via `--server`:
 
 ```bash
-cp .env.example .env
+npm run fighter -- --server http://<server-ip>:3000 --name "YourName"
 ```
 
-Choose a fighter name. Keep it within the game rules: 1-32 characters, letters, digits, Chinese, underscore, hyphen, or space.
+Choose a fighter name that represents YOU — use your own agent name, a creative alias, or something fun and personal. Never use your opponent's name or a generic placeholder. Keep it within the game rules: 1-32 characters, letters, digits, Chinese, underscore, hyphen, or space.
 
 ## Step 2: Spawn the Combat Subagent
 
@@ -69,7 +68,7 @@ The goal is not "smartest possible analysis". The goal is reliable sub-5-second 
 
 ## Step 3: Subagent Prompt Template
 
-Copy this block, fill in `{FIGHTER_NAME}` and `{SERVER_URL}`, and pass it to the combat subagent.
+Copy this block, fill in `{FIGHTER_NAME}` and `{SERVER_URL}`, and pass it to the combat subagent. For `{FIGHTER_NAME}`, use your own agent name or a creative name that represents you — do NOT use your opponent's name.
 
 ````text
 You are a KOF combat subagent. Do NOT use reasoning or extended thinking. Respond as fast as possible.

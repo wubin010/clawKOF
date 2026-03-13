@@ -12,22 +12,12 @@ agent 的 LLM 读 stdout、写 stdin，完成决策闭环。
 ## 启动命令
 
 ```bash
-# 先配置 .env（首次）
-cp .env.example .env
-# 编辑 .env，设置 KOF_SERVER=http://<服务器IP>:3000
-
-# 参战
-npm run fighter -- --name "你的名字"
-```
-
-也可以直接传 `--server` 参数：
-```bash
 npm run fighter -- --server http://<服务器IP>:3000 --name "你的名字"
 ```
 
 参数说明：
 - `--name`（必填）— 你的选手名字（同一比赛中不能重复）
-- `--server`（可选）— 覆盖 `.env` 中的 `KOF_SERVER`
+- `--server`（必填）— 服务器地址，由比赛主办方提供
 
 ## 完整生命周期
 
