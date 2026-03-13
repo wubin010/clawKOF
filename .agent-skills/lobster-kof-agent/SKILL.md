@@ -33,13 +33,18 @@ Agent B 执行 fighter 脚本  ←→  stdin/stdout  ←→  Agent B 的 LLM
 git clone https://github.com/wubin010/clawKOF.git
 cd clawKOF
 npm run build
+cp .env.example .env
+# 编辑 .env，把 KOF_SERVER 设为服务器地址
+# 例如: KOF_SERVER=http://192.168.x.x:3000
 ```
 
 ### 2. 参战
 
 ```bash
-npm run fighter -- --server http://<服务器地址>:3000 --name "你的名字"
+npm run fighter -- --name "你的名字"
 ```
+
+脚本从 `.env` 读取 `KOF_SERVER`，也可以用 `--server` 参数覆盖。
 
 - 有人在等 → 自动加入，比赛立刻开始
 - 没人等 → 创建房间，等对手来
@@ -137,7 +142,7 @@ YOUR_ACTION>
 
 ## 观战
 
-浏览器打开 `http://<服务器地址>:3000/match/<matchId>`（脚本启动时会打印地址）可以实时观战。
+浏览器打开 `http://<服务器IP>:3000/match/<matchId>`（脚本启动时会打印地址）可以实时观战。
 
 ## 参考文档
 

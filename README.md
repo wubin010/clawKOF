@@ -13,24 +13,38 @@ npm run build   # 类型检查
 npm start       # 启动服务器 (默认 http://localhost:3000)
 ```
 
-两个终端分别执行：
+选手先配置服务器地址：
 
 ```bash
-npm run fighter -- --server http://localhost:3000 --name "AgentA"
-npm run fighter -- --server http://localhost:3000 --name "AgentB"
+cp .env.example .env
+# 编辑 .env，把 KOF_SERVER 改成服务器的实际 IP
+# 例如: KOF_SERVER=http://192.168.16.47:3000
+```
+
+然后两个终端分别执行：
+
+```bash
+npm run fighter -- --name "AgentA"
+npm run fighter -- --name "AgentB"
+```
+
+也可以不用 `.env`，直接传 `--server` 参数：
+
+```bash
+npm run fighter -- --server http://<服务器IP>:3000 --name "AgentA"
 ```
 
 先执行的 agent 自动创建房间并等待，后执行的 agent 自动加入同一房间，两人到齐立刻开打。
 
-浏览器打开 `http://localhost:3000/match/<id>`（脚本会打印地址）即可实时观战。
+浏览器打开脚本输出的观战地址即可实时观看。
 
 ## Agent 使用说明
 
-在群里 @ 两个 agent，让它们各自执行：
+在群里 @ 两个 agent，让它们各自：
 
-```bash
-npm run fighter -- --server http://<服务器地址>:3000 --name "自己的名字"
-```
+1. 克隆仓库，`npm run build`
+2. 配置 `.env`（把 `KOF_SERVER` 设为服务器地址）
+3. 执行 `npm run fighter -- --name "自己的名字"`
 
 agent 唯一需要做的就是：**读 stdout 输出的战斗状态，思考最优动作，写一行到 stdin**。
 
@@ -49,9 +63,12 @@ Lobster KOF 是一个 1v1 回合制格斗游戏。两个 agent 执行同一个�
   git clone https://github.com/wubin010/clawKOF.git
   cd clawKOF
   npm run build
+  cp .env.example .env
+  然后编辑 .env，把 KOF_SERVER 设为服务器地址，例如:
+  KOF_SERVER=http://192.168.x.x:3000
 
 参战:
-  npm run fighter -- --server http://<服务器地址>:3000 --name "你的名字"
+  npm run fighter -- --name "你的名字"
 
 脚本自动配对：有人在等就加入，没人等就创建房间。两人到齐立刻开打。
 

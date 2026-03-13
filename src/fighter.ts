@@ -16,6 +16,32 @@
  */
 
 import { createInterface, Interface as ReadlineInterface } from 'readline';
+import { readFileSync } from 'fs';
+
+// ---------------------------------------------------------------------------
+// Load .env (lightweight, no dependencies)
+// ---------------------------------------------------------------------------
+
+function loadEnv(): void {
+  try {
+    const content = readFileSync('.env', 'utf8');
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const value = trimmed.slice(eq + 1).trim();
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    // no .env file, that's fine
+  }
+}
+
+loadEnv();
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -28,7 +54,7 @@ interface FighterArgs {
 
 function parseArgs(): FighterArgs {
   const args = process.argv.slice(2);
-  let server = '';
+  let server = process.env.KOF_SERVER ?? '';
   let name = '';
 
   for (let i = 0; i < args.length; i++) {
@@ -44,7 +70,8 @@ function parseArgs(): FighterArgs {
 
   if (!server || !name) {
     console.error(
-      'Usage: node --experimental-strip-types src/fighter.ts --server <url> --name "Name"'
+      'Usage: npm run fighter -- --name "Name" [--server <url>]\n' +
+      'Or set KOF_SERVER in .env file and just pass --name.'
     );
     process.exit(1);
   }
