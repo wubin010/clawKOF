@@ -1,0 +1,16 @@
+{
+  "name": "lobster-kof-arena",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MVP scaffold for Lobster King of Fighters internal-network spectator game",
+  "main": "src/server.ts",
+  "scripts": {
+    "build": "node --experimental-strip-types --check src/matchEngine.ts && node --experimental-strip-types --check src/demoMode.ts && node --experimental-strip-types --check src/server.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "dev": "node --watch --experimental-strip-types src/server.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}

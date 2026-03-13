@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lobster KOF Spectator</title>
+    <link rel="stylesheet" href="/static/spectator.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="topbar">
+        <div>
+          <h1>Lobster King of Fighters</h1>
+          <p id="meta">Match --</p>
+        </div>
+        <div class="timer">
+          <span>Time</span>
+          <strong id="time">--</strong>
+        </div>
+      </header>
+
+      <section class="arena-wrap">
+        <canvas id="arena" width="960" height="420"></canvas>
+      </section>
+
+      <section class="hud">
+        <article class="fighter" id="fighter-a">
+          <h2 id="a-name">Fighter A</h2>
+          <div class="bar hp"><span id="a-hp-bar"></span></div>
+          <p>HP: <strong id="a-hp">0</strong></p>
+          <div class="bar energy"><span id="a-en-bar"></span></div>
+          <p>Energy: <strong id="a-energy">0</strong></p>
+          <p>Action: <code id="a-action">idle</code></p>
+        </article>
+
+        <article class="fighter" id="fighter-b">
+          <h2 id="b-name">Fighter B</h2>
+          <div class="bar hp"><span id="b-hp-bar"></span></div>
+          <p>HP: <strong id="b-hp">0</strong></p>
+          <div class="bar energy"><span id="b-en-bar"></span></div>
+          <p>Energy: <strong id="b-energy">0</strong></p>
+          <p>Action: <code id="b-action">idle</code></p>
+        </article>
+      </section>
+
+      <section class="status-row">
+        <div>
+          <p>Status: <strong id="status">waiting</strong></p>
+          <p>Distance: <strong id="distance">0</strong></p>
+          <p>Tick: <strong id="tick">0</strong></p>
+        </div>
+        <div id="result" class="result hidden">
+          <h3>Match Finished</h3>
+          <p id="summary"></p>
+          <a id="report-link" href="#" target="_blank" rel="noreferrer">Open JSON report</a>
+        </div>
+      </section>
+
+      <section class="log-wrap">
+        <h3>Action Log</h3>
+        <ul id="log"></ul>
+      </section>
+    </main>
+
+    <script src="/static/spectator.js"></script>
+  </body>
+</html>

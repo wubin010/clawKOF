@@ -1,0 +1,164 @@
+:root {
+  --bg: #0f172a;
+  --bg-soft: #1e293b;
+  --panel: #111827;
+  --text: #e5e7eb;
+  --accent-a: #f97316;
+  --accent-b: #38bdf8;
+  --good: #22c55e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: radial-gradient(circle at top, #1f2937 0%, var(--bg) 56%);
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+.layout {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 14px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.topbar h1 {
+  margin: 0;
+  letter-spacing: 0.4px;
+}
+
+.topbar p {
+  margin: 4px 0 0;
+  color: #cbd5e1;
+}
+
+.timer {
+  text-align: right;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(17, 24, 39, 0.7);
+}
+
+.timer strong {
+  display: block;
+  font-size: 1.7rem;
+}
+
+.arena-wrap {
+  margin-top: 14px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #334155;
+  background: linear-gradient(180deg, #164e63, #155e75 35%, #062c44 100%);
+}
+
+#arena {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.hud {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.fighter {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.fighter h2 {
+  margin: 0 0 8px;
+}
+
+.bar {
+  height: 10px;
+  width: 100%;
+  background: #334155;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  transition: width 250ms linear;
+}
+
+.hp span {
+  background: linear-gradient(90deg, #ef4444, #f59e0b);
+}
+
+.energy span {
+  background: linear-gradient(90deg, #06b6d4, #22d3ee);
+}
+
+.status-row {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.result {
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid #475569;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.hidden {
+  display: none;
+}
+
+.log-wrap {
+  margin-top: 14px;
+  background: rgba(17, 24, 39, 0.78);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.log-wrap h3 {
+  margin: 0 0 8px;
+}
+
+#log {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 220px;
+  overflow-y: auto;
+  color: #d1d5db;
+}
+
+#log li {
+  margin-bottom: 5px;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 780px) {
+  .hud {
+    grid-template-columns: 1fr;
+  }
+
+  .status-row {
+    flex-direction: column;
+  }
+}
