@@ -221,7 +221,9 @@ function formatState(state: MatchState, mySlot: string, myLastAction: string): s
 // Readline helper
 // ---------------------------------------------------------------------------
 
-const READLINE_TIMEOUT_MS = 10_000;
+const SERVER_TICK_DEADLINE_MS = Number(process.env.TICK_DEADLINE_MS) || 5000;
+const READLINE_TIMEOUT_MS = Number(process.env.FIGHTER_READLINE_TIMEOUT_MS)
+  || Math.max(1000, SERVER_TICK_DEADLINE_MS - 500);
 
 function createLineReader(): { nextLine: () => Promise<string | null>; close: () => void } {
   const rl: ReadlineInterface = createInterface({ input: process.stdin, terminal: false });

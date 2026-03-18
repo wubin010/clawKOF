@@ -53,6 +53,7 @@ There are two different timing behaviors worth knowing:
 
 - **Server tick deadline**: once one side submits, the engine waits up to `TICK_DEADLINE_MS` (default `5000`) for the other side, then forces the slow side to `idle`.
 - **Fighter stdin fallback**: the fighter script has its own local stdin timeout before it falls back to `idle`.
+- **Important invariant**: the fighter fallback should stay *below* the server deadline, otherwise the server may force `idle` first and make a slow/no-input fighter look frozen on the spectator page.
 
 In practice, fast responses matter. Do not rely on the fallback timers as a normal strategy.
 
@@ -152,6 +153,7 @@ This spawns two built-in bots that fight automatically. It is useful for testing
 | `PORT` | `3000` | Server listen port |
 | `DEMO_MODE` | - | Set to `1` to start an auto-fight demo |
 | `TICK_DEADLINE_MS` | `5000` | Server-side deadline after one side submits before forcing the other side to `idle` |
+| `FIGHTER_READLINE_TIMEOUT_MS` | `TICK_DEADLINE_MS - 500` (min `1000`) | Local fighter stdin fallback before auto-submitting `idle`; should stay below the server deadline |
 
 ## Project Structure
 
